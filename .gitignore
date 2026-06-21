@@ -1,7 +1,6 @@
 *.depend
 *.layout
-obj/
 bin/
+obj/
 *.o
 *.exe
-*.out
