@@ -4,6 +4,7 @@
 
 int main(int argc, const char* argv[])
 {
+    // Minor Change
     Chunk chunk;
     initChunk(&chunk);
     writeChunk(&chunk, OP_RETURN);
