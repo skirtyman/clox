@@ -14,6 +14,20 @@ void disassembleChunk(Chunk* chunk, const char* name)
         offset = disassembleInstruction(chunk, offset);
 }
 
+// Print an instruction that is 2 bytes in size.
+static int constantInstruction(const char* name, Chunk* chunk, int offset)
+{
+    // Get the constant within the chunk at a specified index.
+    // NOTE: Offset stores the index of the OP-CODE and so the constant itself is 1-byte along.
+    uint8_t constant = chunk -> code[offset + 1];
+    // Print the OP-CODE name as well as the location of the constant within the constant pool.
+    printf("%-16s %4d '", name, constant);
+    // Print the constant value being using the OP-CODE.
+    printValue(chunk -> constants.values[constant]);
+    printf("'\n");
+    return offset + 2;
+}
+
 // Print an instruction that is 1 byte in size.
 static int simpleInstruction(const char* name, int offset)
 {
@@ -28,10 +42,18 @@ int disassembleInstruction(Chunk* chunk, int offset)
     // Print the offset of within the given chunk.
     printf("%04d ", offset);
 
+    // Print a <|> within the byte-code instruction if it comes from the same line of source code as the previous instruction.
+    if (offset > 0 && chunk -> lines[offset] == chunk -> lines[offset - 1])
+        printf("   | ");
+    else
+        printf("%4d ", chunk -> lines[offset]);
+
     // Extract the instruction within the chunk at the specified offset.
     uint8_t instruction = chunk -> code[offset];
     switch (instruction)
     {
+        case OP_CONSTANT:
+            return constantInstruction("OP_CONSTANT", chunk, offset);
         case OP_RETURN:
             return simpleInstruction("OP_RETURN", offset);
         default:

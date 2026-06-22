@@ -36,6 +36,10 @@
 		</Unit>
 		<Unit filename="chunk.h" />
 		<Unit filename="common.h" />
+		<Unit filename="debug.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="debug.h" />
 		<Unit filename="main.c">
 			<Option compilerVar="CC" />
 		</Unit>
@@ -43,6 +47,7 @@
 			<Option compilerVar="CC" />
 		</Unit>
 		<Unit filename="memory.h" />
+		<Unit filename="value.h" />
 		<Extensions />
 	</Project>
 </CodeBlocks_project_file>

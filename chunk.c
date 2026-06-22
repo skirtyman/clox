@@ -7,9 +7,11 @@ void initChunk(Chunk* chunk)
     chunk -> count = 0;
     chunk -> capacity = 0;
     chunk -> code = NULL;
+    chunk -> lines = NULL;
+    initValueArray(&chunk -> constants);
 }
 
-void writeChunk(Chunk* chunk, uint8_t byte)
+void writeChunk(Chunk* chunk, uint8_t byte, int line)
 {
     // Check that the chunk has capacity to store another op-code.
     if (chunk -> capacity < chunk -> count + 1)
@@ -19,16 +21,29 @@ void writeChunk(Chunk* chunk, uint8_t byte)
         // Change the capacity of the chunk and re-allocate the old chunk of memory to the new (re-sized) array.
         chunk -> capacity = GROW_CAPACITY(oldCapacity);
         chunk -> code = GROW_ARRAY(uint8_t, chunk -> code, oldCapacity, chunk -> capacity);
+        chunk -> lines = GROW_ARRAY(int, chunk -> lines, oldCapacity, chunk -> capacity);
     }
     // Add the new op-code to the dynamic array `chunk`.
     chunk -> code[chunk -> count] = byte;
+    chunk -> lines[chunk -> count] = line;
     chunk -> count++;
+}
+
+int addConstant(Chunk* chunk, Value value)
+{
+    writeValueArray(&chunk -> constants, value);
+    // Return the index of the value added for later use.
+    return chunk -> constants.count - 1;
 }
 
 void freeChunk(Chunk* chunk)
 {
     // Free the memory allocated to the dynamic array storing the byte-code of the chunk to be freed.
     FREE_ARRAY(uint8_t, chunk -> code, chunk -> capacity);
+    // Free the line number array within the chunk.
+    FREE_ARRAY(int, chunk -> lines, chunk -> capacity);
+    // Free the memory allocated to the constant pool to avoid a memory leak.
+    freeValueArray(&chunk -> constants);
     // Re-initialise the same chunk with default parameters. Hence, resetting it.
     initChunk(chunk);
 }
