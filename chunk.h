@@ -7,6 +7,12 @@
 typedef enum
 {
     OP_CONSTANT, // Form >>> OP_CONSTANT <index> => VM must fetch the constant at <index> within the chunk's constant pool. This is a 2 byte instruction as index is 1-byte in size.
+    OP_ADD, // Form >>> OP_ADD => Returns the result of arithmetic addition of the 2 operands. This is a 1 byte instruction as OP_ADD, uses the operands stored in the stack and not
+            //                    for the instruction itself. The same applies to OP_SUBTRACT, OP_MULTIPLY, OP_DIVIDE.
+    OP_SUBTRACT,
+    OP_MULTIPLY,
+    OP_DIVIDE,
+    OP_NEGATE, // Form >>> OP_NEGATE <operand> => Returns negation of operand => OP_NEGATE 1.0 == -1.0. This is a 2 byte instruction.
     OP_RETURN, // The VM has reached the end of a chunk of byte-code and returns the current execution frame (function).
 } OpCode;
 
