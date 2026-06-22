@@ -1,6 +1,7 @@
 #include <stdio.h>
 
 #include "common.h"
+#include "compiler.h"
 #include "debug.h"
 #include "vm.h"
 
@@ -99,11 +100,8 @@ static InterpretResult run()
     #undef BINARY_OP
 }
 
-InterpretResult interpret(Chunk* chunk)
+InterpretResult interpret(const char* chunk)
 {
-    vm.chunk = chunk;
-    // Set the VM's instruction to point to the instruction of the first byte-code instruction.
-    vm.ip = vm.chunk -> code;
-    // Run the virtual machine on the chunk.
-    return run();
+    compile(source);
+    return INTERPRET_OK;
 }
