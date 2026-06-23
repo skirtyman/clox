@@ -161,7 +161,7 @@ static TokenType identifierType()
         case 'r': return checkKeyword(1, 5, "eturn", TOKEN_RETURN);
         case 's': return checkKeyword(1, 4, "uper", TOKEN_SUPER);
         case 't':
-            if (scanner.curren - scanner.start > 1)
+            if (scanner.current - scanner.start > 1)
             {
                 switch(scanner.start[1])
                 {
@@ -240,17 +240,17 @@ Token scanToken()
 
     switch(c)
     {
-        case '(': return makeToken(TOKEN_LEFT_PAREN)
-        case ')': return makeToken(TOKEN_RIGHT_PAREN)
-        case '{': return makeToken(TOKEN_LEFT_BRACE)
-        case '}': return makeToken(TOKEN_RIGHT_BRACE)
-        case ';': return makeToken(TOKEN_SEMICOLON)
-        case ',': return makeToken(TOKEN_COMMA)
-        case '.': return makeToken(TOKEN_DOT)
-        case '-': return makeToken(TOKEN_MINUS)
-        case '+': return makeToken(TOKEN_PLUS)
-        case '*': return makeToken(TOKEN_SLASH)
-        case '/': return makeToken(TOKEN_STAR)
+        case '(': return makeToken(TOKEN_LEFT_PAREN);
+        case ')': return makeToken(TOKEN_RIGHT_PAREN);
+        case '{': return makeToken(TOKEN_LEFT_BRACE);
+        case '}': return makeToken(TOKEN_RIGHT_BRACE);
+        case ';': return makeToken(TOKEN_SEMICOLON);
+        case ',': return makeToken(TOKEN_COMMA);
+        case '.': return makeToken(TOKEN_DOT);
+        case '-': return makeToken(TOKEN_MINUS);
+        case '+': return makeToken(TOKEN_PLUS);
+        case '*': return makeToken(TOKEN_STAR);
+        case '/': return makeToken(TOKEN_SLASH);
         case '!':
             return makeToken(match('=') ? TOKEN_BANG_EQUAL : TOKEN_BANG);
         case '=':
@@ -261,7 +261,6 @@ Token scanToken()
             return makeToken(match('=') ? TOKEN_GREATER_EQUAL : TOKEN_GREATER);
         case '"': return string();
     }
-
 
     return errorToken("Unexpected character");
 }

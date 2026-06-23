@@ -36,6 +36,10 @@
 		</Unit>
 		<Unit filename="chunk.h" />
 		<Unit filename="common.h" />
+		<Unit filename="compiler.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="compiler.h" />
 		<Unit filename="debug.c">
 			<Option compilerVar="CC" />
 		</Unit>
@@ -47,7 +51,18 @@
 			<Option compilerVar="CC" />
 		</Unit>
 		<Unit filename="memory.h" />
+		<Unit filename="scanner.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="scanner.h" />
+		<Unit filename="value.c">
+			<Option compilerVar="CC" />
+		</Unit>
 		<Unit filename="value.h" />
+		<Unit filename="vm.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="vm.h" />
 		<Extensions />
 	</Project>
 </CodeBlocks_project_file>

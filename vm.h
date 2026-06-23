@@ -24,7 +24,8 @@ typedef enum
 
 void initVM();
 void freeVM();
-// // Interpret a given string of Lox source code, returning a status code for the result of the interpreter.
+
+// Interpret a given string of Lox source code, returning a status code for the result of the interpreter.
 InterpretResult interpret(const char* chunk);
 
 // Stack operations to be able to manipulate the VM's instruction stack.

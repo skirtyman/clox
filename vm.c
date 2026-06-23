@@ -100,8 +100,27 @@ static InterpretResult run()
     #undef BINARY_OP
 }
 
-InterpretResult interpret(const char* chunk)
+InterpretResult interpret(const char* source)
 {
-    compile(source);
-    return INTERPRET_OK;
+    // Initialize a temporary, local chunk to store the compiled byte-code for the VM to execute.
+    Chunk chunk;
+    initChunk(&chunk);
+
+    // Compile the source code into byte-code. Abort and clean up memory if a compilation error occurs.
+    if (!compile(source, &chunk))
+    {
+        freeChunk(&chunk);
+        return INTERPRET_COMPILE_ERROR;
+    }
+
+    // Bind the compiled source code to the VM ready for execution. Also set IP to point to the first compiled instruction.
+    vm.chunk = &chunk;
+    vm.ip = vm.chunk -> code;
+
+    // Execute the byte-code within the virtual machine.
+    InterpretResult result = run();
+
+    // Free the allocated byte-code in the chunk and return the result from the VM.
+    freeChunk(&chunk);
+    return result;
 }
