@@ -247,6 +247,12 @@ static void number()
     emitConstant(NUMBER_VAL(value));
 }
 
+// Emit the byte-code for a string literal by stripping its surrounding quotes, copying the characters to the heap, and emitting its constant pool index.
+static void string()
+{
+    emitConstant(OBJ_VAL(copyString(parser.previous.start + 1, parser.previous.length - 2)));
+}
+
 // Parse a unary expression (such as !a, -a).
 static void unary()
 {
@@ -289,7 +295,7 @@ ParseRule rules[] = {
   [TOKEN_LESS]          = {NULL,     binary, PREC_COMPARISON},   // Infix relational comparison operator ('a < b'). Covered fully in a later section.
   [TOKEN_LESS_EQUAL]    = {NULL,     binary, PREC_COMPARISON},   // Infix relational comparison operator ('a <= b'). Covered fully in a later section.
   [TOKEN_IDENTIFIER]    = {NULL,     NULL,   PREC_NONE},   // Variable lookups and targets. Will act as a prefix literal loader.
-  [TOKEN_STRING]        = {NULL,     NULL,   PREC_NONE},   // Raw character sequence data literal. Will act as a prefix literal loader.
+  [TOKEN_STRING]        = {string,   NULL,   PREC_NONE},   // Raw character sequence data literal. Will act as a prefix literal loader.
   [TOKEN_NUMBER]        = {number,   NULL,   PREC_NONE},   // Numeric data literal (e.g., '3.14'). Emits raw values immediately via prefix.
   [TOKEN_AND]           = {NULL,     NULL,   PREC_NONE},   // Logical short-circuiting conjunction operator ('a and b').
   [TOKEN_CLASS]         = {NULL,     NULL,   PREC_NONE},   // Keyword introducing object blueprint descriptions. Handled as a declaration statement.

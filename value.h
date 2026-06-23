@@ -3,12 +3,18 @@
 
 #include "common.h"
 
+// Forward definitions for the heap-allocated objects within CLox. This is to avoid circular dependency with #include between `value.h` and `object.h`
+typedef struct Obj Obj;
+typedef struct ObjString ObjString;
+
 // Define an enum to represent data within the VM.
 typedef enum
 {
     VAL_BOOL,
     VAL_NIL,
     VAL_NUMBER,
+    VAL_OBJ // Any item stored on the stack that is not a number, boolean, or nil, such as strings/functions/classes etc.
+            // In this case VAL_OBJ acts as a pointer to the heap which stores the object itself.
 } ValueType;
 
 // Define a tagged union to compactly represent values within the VM.
@@ -19,6 +25,7 @@ typedef struct
     {
         bool boolean;
         double number;
+        Obj* obj;
     } as;
 } Value;
 
@@ -26,9 +33,10 @@ typedef struct
 #define IS_BOOL(value)   ((value).type == VAL_BOOL)
 #define IS_NIL(value)    ((value).type == VAL_NIL)
 #define IS_NUMBER(value) ((value).type == VAL_NUMBER)
-
+#define IS_OBJ(value)    ((value).type == VAL_OBJ)
 
 // MACROs to convert a CLox Value into a native C value.
+#define AS_OBJ(value)    ((value).as.obj)
 #define AS_BOOL(value)   ((value).as.boolean)
 #define AS_NUMBER(value) ((value).as.number)
 
@@ -36,7 +44,7 @@ typedef struct
 #define BOOL_VAL(value)   ((Value){VAL_BOOL, {.boolean = value}})
 #define NIL_VAL           ((Value){VAL_NIL, {.number = 0}})
 #define NUMBER_VAL(value) ((Value){VAL_NUMBER, {.number = value}})
-
+#define OBJ_VAL(object)   ((Value){VAL_OBJ, {.obj = (Obj*)object}})
 
 // Define a dynamic-array of values within the VM. This is the constant pool and allows us to query literal values by index.
 typedef struct
