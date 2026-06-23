@@ -196,12 +196,30 @@ static void binary()
     // Emit the appropriate arithmetic byte-code instruction based on the operator type.
     switch (operatorType)
     {
-        // Each arithmetic instruction is a 1-byte OP-CODE because the VM pops the left
-        // and right operands directly from the stack rather than reading in-line byte-code operands.
+        case TOKEN_BANG_EQUAL: emitBytes(OP_EQUAL, OP_NOT); break;
+        case TOKEN_EQUAL_EQUAL: emitByte(OP_EQUAL); break;
+        case TOKEN_GREATER: emitByte(OP_GREATER); break;
+        case TOKEN_GREATER_EQUAL: emitBytes(OP_LESS, OP_NOT); break;
+        case TOKEN_LESS: emitByte(OP_LESS); break;
+        case TOKEN_LESS_EQUAL: emitBytes(OP_GREATER, OP_NOT); break;
         case TOKEN_PLUS:  emitByte(OP_ADD); break;
         case TOKEN_MINUS: emitByte(OP_SUBTRACT); break;
         case TOKEN_STAR:  emitByte(OP_MULTIPLY); break;
         case TOKEN_SLASH: emitByte(OP_DIVIDE); break;
+        default: return; // Unreachable.
+    }
+}
+
+static void literal()
+{
+    // Inspect the specific keyword token type that triggered this prefix compilation routine.
+    switch (parser.previous.type)
+    {
+        // Each literal token type emits a dedicated 1-byte opcode, instructing the VM
+        // to push the corresponding immediate built-in value directly onto the stack at runtime.
+        case TOKEN_FALSE: emitByte(OP_FALSE); break;
+        case TOKEN_NIL:   emitByte(OP_NIL);   break;
+        case TOKEN_TRUE:  emitByte(OP_TRUE);  break;
         default: return; // Unreachable.
     }
 }
@@ -225,7 +243,8 @@ static void number()
 {
     // Convert the token just scanned to a double and write it to the chunk.
     double value = strtod(parser.previous.start, NULL);
-    emitConstant(value);
+    // Wrap the converted number literal into the VM Value type.
+    emitConstant(NUMBER_VAL(value));
 }
 
 // Parse a unary expression (such as !a, -a).
@@ -240,6 +259,7 @@ static void unary()
     // Emit the operator instruction and add it to the compiled byte-code.
     switch (operatorType)
     {
+        case TOKEN_BANG: emitByte(OP_NOT); break;
         case TOKEN_MINUS: emitByte(OP_NEGATE); break;
         default: return; // Unreachable.
     }
@@ -260,31 +280,31 @@ ParseRule rules[] = {
   [TOKEN_SEMICOLON]     = {NULL,     NULL,   PREC_NONE},   // Statement terminator token. Delimits execution bounds rather than producing values.
   [TOKEN_SLASH]         = {NULL,     binary, PREC_FACTOR}, // Acts strictly as an infix division operator ('a / b') at multiplication level.
   [TOKEN_STAR]          = {NULL,     binary, PREC_FACTOR}, // Acts strictly as an infix multiplication operator ('a * b') at multiplication level.
-  [TOKEN_BANG]          = {NULL,     NULL,   PREC_NONE},   // Prefix logical negation operator ('!a'). Covered fully in a later section.
-  [TOKEN_BANG_EQUAL]    = {NULL,     NULL,   PREC_NONE},   // Infix structural inequality operator ('a != b'). Covered fully in a later section.
+  [TOKEN_BANG]          = {unary,    NULL,   PREC_NONE},   // Prefix logical negation operator ('!a'). Covered fully in a later section.
+  [TOKEN_BANG_EQUAL]    = {NULL,     binary, PREC_EQUALITY},   // Infix structural inequality operator ('a != b'). Covered fully in a later section.
   [TOKEN_EQUAL]         = {NULL,     NULL,   PREC_NONE},   // Variable assignment operator ('a = b'). Evaluated safely below equality levels.
-  [TOKEN_EQUAL_EQUAL]   = {NULL,     NULL,   PREC_NONE},   // Infix structural equality operator ('a == b'). Covered fully in a later section.
-  [TOKEN_GREATER]       = {NULL,     NULL,   PREC_NONE},   // Infix relational comparison operator ('a > b'). Covered fully in a later section.
-  [TOKEN_GREATER_EQUAL] = {NULL,     NULL,   PREC_NONE},   // Infix relational comparison operator ('a >= b'). Covered fully in a later section.
-  [TOKEN_LESS]          = {NULL,     NULL,   PREC_NONE},   // Infix relational comparison operator ('a < b'). Covered fully in a later section.
-  [TOKEN_LESS_EQUAL]    = {NULL,     NULL,   PREC_NONE},   // Infix relational comparison operator ('a <= b'). Covered fully in a later section.
+  [TOKEN_EQUAL_EQUAL]   = {NULL,     binary, PREC_EQUALITY},   // Infix structural equality operator ('a == b'). Covered fully in a later section.
+  [TOKEN_GREATER]       = {NULL,     binary, PREC_COMPARISON},   // Infix relational comparison operator ('a > b'). Covered fully in a later section.
+  [TOKEN_GREATER_EQUAL] = {NULL,     binary, PREC_COMPARISON},   // Infix relational comparison operator ('a >= b'). Covered fully in a later section.
+  [TOKEN_LESS]          = {NULL,     binary, PREC_COMPARISON},   // Infix relational comparison operator ('a < b'). Covered fully in a later section.
+  [TOKEN_LESS_EQUAL]    = {NULL,     binary, PREC_COMPARISON},   // Infix relational comparison operator ('a <= b'). Covered fully in a later section.
   [TOKEN_IDENTIFIER]    = {NULL,     NULL,   PREC_NONE},   // Variable lookups and targets. Will act as a prefix literal loader.
   [TOKEN_STRING]        = {NULL,     NULL,   PREC_NONE},   // Raw character sequence data literal. Will act as a prefix literal loader.
   [TOKEN_NUMBER]        = {number,   NULL,   PREC_NONE},   // Numeric data literal (e.g., '3.14'). Emits raw values immediately via prefix.
   [TOKEN_AND]           = {NULL,     NULL,   PREC_NONE},   // Logical short-circuiting conjunction operator ('a and b').
   [TOKEN_CLASS]         = {NULL,     NULL,   PREC_NONE},   // Keyword introducing object blueprint descriptions. Handled as a declaration statement.
   [TOKEN_ELSE]          = {NULL,     NULL,   PREC_NONE},   // Keyword splitting conditional statement logical execution flows.
-  [TOKEN_FALSE]         = {NULL,     NULL,   PREC_NONE},   // Boolean false data literal. Will act as a prefix literal loader.
+  [TOKEN_FALSE]         = {literal,  NULL,   PREC_NONE},   // Boolean false data literal. Will act as a prefix literal loader.
   [TOKEN_FOR]           = {NULL,     NULL,   PREC_NONE},   // Keyword introducing basic entry iterative control structures.
   [TOKEN_FUN]           = {NULL,     NULL,   PREC_NONE},   // Keyword introducing local subroutine declarations.
   [TOKEN_IF]            = {NULL,     NULL,   PREC_NONE},   // Keyword introducing basic branching conditional execution flows.
-  [TOKEN_NIL]           = {NULL,     NULL,   PREC_NONE},   // Clear representation of null/empty data references.
+  [TOKEN_NIL]           = {literal,  NULL,   PREC_NONE},   // Clear representation of null/empty data references.
   [TOKEN_OR]            = {NULL,     NULL,   PREC_NONE},   // Logical short-circuiting disjunction operator ('a or b').
   [TOKEN_PRINT]         = {NULL,     NULL,   PREC_NONE},   // Statement keyword outputting evaluation results straight to stdout.
   [TOKEN_RETURN]        = {NULL,     NULL,   PREC_NONE},   // Statement keyword exiting active frames, optionally tracking output variables.
   [TOKEN_SUPER]         = {NULL,     NULL,   PREC_NONE},   // References base implementation contexts during class inheritance lookups.
   [TOKEN_THIS]          = {NULL,     NULL,   PREC_NONE},   // References local instantiation contexts during instance method lookups.
-  [TOKEN_TRUE]          = {NULL,     NULL,   PREC_NONE},   // Boolean true data literal. Will act as a prefix literal loader.
+  [TOKEN_TRUE]          = {literal,  NULL,   PREC_NONE},   // Boolean true data literal. Will act as a prefix literal loader.
   [TOKEN_VAR]           = {NULL,     NULL,   PREC_NONE},   // Statement keyword declaring new mutable data spaces within local scope.
   [TOKEN_WHILE]         = {NULL,     NULL,   PREC_NONE},   // Keyword introducing basic truth-dependent looping control structures.
   [TOKEN_ERROR]         = {NULL,     NULL,   PREC_NONE},   // Synthetic placeholder token dispatched to signal lexing anomalies safely.

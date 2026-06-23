@@ -1,3 +1,4 @@
+#include <stdarg.h>
 #include <stdio.h>
 
 #include "common.h"
@@ -11,6 +12,27 @@ VM vm;
 static void resetStack()
 {
     vm.stackTop = vm.stack;
+}
+
+// Report a runtime error to the use.
+static void runtimeError(const char* format, ...)
+{
+    // Initialize a variable argument list to handle dynamic string formatting.
+    va_list args;
+    va_start(args, format);
+    // Print the formatted error message directly to the standard error stream.
+    vfprintf(stderr, format, args);
+    va_end(args);
+    fputs("\n", stderr);
+
+    // Calculate the current instruction index by finding the offset of the instruction pointer
+    // relative to the beginning of the byte-code chunk. We subtract 1 because `ip` has already
+    // advanced past the failing instruction.
+    size_t instruction = vm.ip - vm.chunk->code - 1;
+    // Look up the source code line number associated with the failing byte-code instruction offset.
+    int line = vm.chunk->lines[instruction];
+    fprintf(stderr, "[line %d] in script\n", line);
+    // Clear the VM's value stack to reset the engine state cleanly after the crash.
 }
 
 void initVM()
@@ -36,6 +58,19 @@ Value pop()
     return *vm.stackTop;
 }
 
+// Peek the item <distance> from the the top of the stack.
+// Distance == 0 => Normal peek, Distance == 1 => peek() after popping an item from the stack.
+static Value peek(int distance)
+{
+    return vm.stackTop[-1 - distance];
+}
+
+// Determine the falsiness of a value. Nil and False => falsey and every other value is truthy.
+static bool isFalsey(Value value)
+{
+    return IS_NIL(value) || (IS_BOOL(value) && !AS_BOOL(value));
+}
+
 static InterpretResult run()
 {
     // Get a byte-code instruction by dereferencing the pointer and returning the item and then incrementing the instruction pointer.
@@ -45,11 +80,15 @@ static InterpretResult run()
     // at this address.
     #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
     // Stack operations required to process binary operations.
-    #define BINARY_OP(op) \
+    #define BINARY_OP(valueType, op) \
         do { \
-          double b = pop(); \
-          double a = pop(); \
-          push(a op b); \
+            if (!IS_NUMBER(peek(0)) || !IS_NUMBER(peek(1))) { \
+                runtimeError("Operands must be numbers."); \
+                return INTERPRET_RUNTIME_ERROR; \
+            } \
+            double b = AS_NUMBER(pop()); \
+            double a = AS_NUMBER(pop()); \
+            push(valueType(a op b)); \
         } while (false)
 
 
@@ -80,12 +119,33 @@ static InterpretResult run()
                 push(constant); // Constant found, add to VM's instruction stack.
                 break;
             }
-            case OP_ADD: BINARY_OP(+); break;
-            case OP_SUBTRACT: BINARY_OP(-); break;
-            case OP_MULTIPLY: BINARY_OP(*); break;
-            case OP_DIVIDE: BINARY_OP(/); break;
+            case OP_NIL: push(NIL_VAL); break;
+            case OP_TRUE: push(BOOL_VAL(true)); break;
+            case OP_FALSE: push(BOOL_VAL(false)); break;
+            case OP_EQUAL:
+            {
+                Value b = pop();
+                Value a = pop();
+                push(BOOL_VAL(valuesEqual(a, b)));
+                break;
+            }
+            case OP_GREATER: BINARY_OP(BOOL_VAL, >); break;
+            case OP_LESS: BINARY_OP(BOOL_VAL, <); break;
+            case OP_ADD: BINARY_OP(NUMBER_VAL, +); break;
+            case OP_SUBTRACT: BINARY_OP(NUMBER_VAL, -); break;
+            case OP_MULTIPLY: BINARY_OP(NUMBER_VAL, *); break;
+            case OP_DIVIDE: BINARY_OP(NUMBER_VAL, /); break;
+            case OP_NOT:
+                push(BOOL_VAL(isFalsey(pop())));
+                break;
             case OP_NEGATE:
-                push(-pop());
+                // Check that value to be negative is numeric and hence negatable. Return a runtime error if not.
+                if (!IS_NUMBER(peek(0)))
+                {
+                    runtimeError("Operand must be a number.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(NUMBER_VAL(-AS_NUMBER(pop())));
                 break;
             case OP_RETURN:
                 // Interpreter has successfully finished executing the chunk, we can know print the top of the stack (the result).

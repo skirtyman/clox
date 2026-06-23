@@ -7,11 +7,18 @@
 typedef enum
 {
     OP_CONSTANT, // Form >>> OP_CONSTANT <index> => VM must fetch the constant at <index> within the chunk's constant pool. This is a 2 byte instruction as index is 1-byte in size.
+    OP_NIL, // Form >>> OP_NIL => Push a Nil value onto the VM stack. This is a 1-byte instruction.
+    OP_TRUE, // Form >>> OP_TRUE => Push the boolean value `true` on to the VM stack. This is a 1-byte instruction.
+    OP_FALSE, // Form >>> OP_FALSE => Push the boolean value `false` on to the VM stack. This is a 1-byte instruction.
+    OP_EQUAL, // Form >>> OP_EQUAL => Push the boolean value `a == b` on to the VM stack where a and b are popped operands. This is a 1-byte instruction.
+    OP_GREATER, // Form >>> OP_GREATER => Push the boolean value `a > b` on to the VM stack where a and b are popped operands. This is a 1-byte instruction.
+    OP_LESS, // Form >>> OP_LESS => Push the boolean value `a < b` on to the VM stack where a and b are popped operands. This is a 1-byte instruction.
     OP_ADD, // Form >>> OP_ADD => Returns the result of arithmetic addition of the 2 operands. This is a 1 byte instruction as OP_ADD, uses the operands stored in the stack and not
             //                    for the instruction itself. The same applies to OP_SUBTRACT, OP_MULTIPLY, OP_DIVIDE.
     OP_SUBTRACT,
     OP_MULTIPLY,
     OP_DIVIDE,
+    OP_NOT, // Form >>> OP_NOT => Return the logical NOT of the operand. This is 1 byte instruction.
     OP_NEGATE, // Form >>> OP_NEGATE <operand> => Returns negation of operand => OP_NEGATE 1.0 == -1.0. This is a 2 byte instruction.
     OP_RETURN, // The VM has reached the end of a chunk of byte-code and returns the current execution frame (function).
 } OpCode;
