@@ -11,6 +11,9 @@ typedef enum
     OP_TRUE, // Form >>> OP_TRUE => Push the boolean value `true` on to the VM stack. This is a 1-byte instruction.
     OP_FALSE, // Form >>> OP_FALSE => Push the boolean value `false` on to the VM stack. This is a 1-byte instruction.
     OP_POP, // Form >>> OP_POP => Pop a value from the top of the stack. This is a 1-byte instruction.
+    OP_GET_LOCAL, // Form >>> OP_GET_LOCAL <index> => Fetches a local variable from the VM stack at the specified <index> slot and pushes it to the top of the stack. This is a 2-byte instruction.
+    OP_SET_LOCAL, // Form >>> OP_SET_LOCAL <index> => Updates the local variable value directly in the VM stack at the specified <index> slot with the value from the top of the stack.
+                  // This is a 2-byte instruction.
     OP_GET_GLOBAL, // Form >>> OP_GET_GLOBAL => Get a global variable with a specified index into the constant pool. This index points to the heap-allocated hash table.
     OP_DEFINE_GLOBAL, // Form >>> OP_DEFINE_GLOBAL => Define a global variable on the VM heap.
     OP_SET_GLOBAL, // Form >>> OP_SET_GLOBAL <index> => Sets a global variable, whose name is constantsTable[index] within the VM globals hash table to the item popped off of the VM stack.
