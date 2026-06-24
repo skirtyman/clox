@@ -31,6 +31,7 @@ typedef enum
     OP_JUMP, // Form >>> OP_JUMP <offset> => Unconditionally advances the instruction pointer forward by the 2-byte <offset>. This is a 3-byte instruction.
     OP_JUMP_IF_FALSE, // Form >>> OP_JUMP_IF_FALSE <offset> => Pops the condition value. If false, advances the instruction pointer by the 2-byte <offset>. This is a 3-byte instruction.
     OP_LOOP, // Form >>> OP_LOOP => Enables looping applying a negative jump to the `ip`.
+    OP_CALL, // Form >>> OP_CALL <argCount> => Invokes a callable object at the stack slot below the <argCount> arguments, creating a new CallFrame. This is a 2-byte instruction.
     OP_RETURN, // The VM has reached the end of a chunk of byte-code and returns the current execution frame (function).
 } OpCode;
 

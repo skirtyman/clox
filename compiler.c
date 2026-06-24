@@ -51,8 +51,20 @@ typedef struct
     int depth; // 0 => Global scope. 1 => One level of nesting, e.g. Nested within an IF statement which is in global scope.
 } Local;
 
-typedef struct
+// Tracks the compiler's current context (compiling a function/class? compiling the implicit main()?) to enforce valid syntax rules (like 'return' statement limits).
+typedef enum
 {
+    TYPE_FUNCTION, // A standard, user-defined Lox function declared with the 'fun' keyword.
+    TYPE_SCRIPT // The top-level execution context representing the main body of the source file.
+} FunctionType;
+
+
+typedef struct Compiler
+{
+    struct Compiler* enclosing; // A pointer to the compiler handling the surrounding lexical scope, allowing us to unwind back to the enclosing function.
+    ObjFunction* function; // We can assume that all code within a CLox program is in an implicit main() function body. This points to that function
+    FunctionType type; // Distinguishes if we are compiling a top-level script, a standard function, a class method, or an initializer.
+
     Local locals[UINT8_COUNT]; // A flat array tracking all local variables currently in scope during compilation, limited to a maximum of 256 active locals.
                                // These are ordered in the same order in which they are declared in the source code.
     int localCount; // The total number of local variables currently active in the locals array, used as the next available index slot.
@@ -69,7 +81,7 @@ Chunk* compilingChunk;
 // Get the current chunk being compiled.
 static Chunk* currentChunk()
 {
-    return compilingChunk;
+    return &current -> function -> chunk;
 }
 
 // Prints formatted compilation errors to stderr and flags that the compilation failed.
@@ -189,6 +201,7 @@ static void emitLoop(int loopStart)
 
 static void emitReturn()
 {
+    emitByte(OP_NIL);
     emitByte(OP_RETURN);
 }
 
@@ -241,23 +254,40 @@ static int emitJump(uint8_t instruction)
     return currentChunk() -> count - 2;
 }
 
-static void initCompiler(Compiler* compiler)
+static void initCompiler(Compiler* compiler, FunctionType type)
 {
+    compiler -> enclosing = current;
+    compiler -> function = NULL;
+    compiler -> type = type;
     compiler -> localCount = 0;
     compiler -> scopeDepth = 0;
+    compiler -> function = newFunction();
     current = compiler;
+    if (type != TYPE_SCRIPT)
+    {
+        current -> function -> name = copyString(parser.previous.start, parser.previous.length);
+    }
+
+    Local* local = &current -> locals[current -> localCount++];
+    local -> depth = 0;
+    local -> name.start = "";
+    local -> name.length = 0;
 }
 
 // Shut-down procedure for the compiler.
-static void endCompiler()
+static ObjFunction* endCompiler()
 {
     emitReturn();
+    // Return the compiled function to the interpreter as the compiler has finished.
+    ObjFunction* function = current -> function;
     #ifdef DEBUG_PRINT_CODE
     if (!parser.hadError)
     {
-        disassembleChunk(currentChunk(), "code");
+        disassembleChunk(currentChunk(), function -> name != NULL ? function -> name -> chars : "<script>");
     }
     #endif
+    current = current -> enclosing;
+    return function;
 }
 
 // Enter a deeper nested scope, meaning all parsed tokens are in a tighter scope.
@@ -291,6 +321,31 @@ static void defineVariable(uint8_t global);
 static int resolveLocal(Compiler* compiler, Token* name);
 static void markInitialized();
 static int initJump(uint8_t instruction);
+
+// Parse a comma-separated list of arguments inside a function call expression.
+static uint8_t argumentList()
+{
+    uint8_t argCount = 0;
+    // If the next token is not a closing parenthesis, there are arguments to evaluate.
+    if (!check(TOKEN_RIGHT_PAREN))
+    {
+        do
+        {
+            // Compile the argument expression, forcing its evaluated value onto the VM stack at runtime.
+            expression();
+            // Keep a compile-time count of arguments to pass as an operand to the call instruction. Ensuring too many arguments are not given.
+            if (argCount == 255)
+            {
+                error("Can't have more than 255 arguments.");
+            }
+            argCount++;
+        } while (match(TOKEN_COMMA));
+    }
+    // Ensure the argument list closes cleanly before yielding control back to the call parser.
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after arguments.");
+    return argCount;
+}
+
 
 static void and_(bool canAssign)
 {
@@ -334,6 +389,16 @@ static void binary(bool canAssign)
     }
 }
 
+// Parse a function call expression, processing its arguments and emitting the call instruction.
+static void call(bool canAssign)
+{
+    // Evaluate the comma-separated arguments on the stack and return the total count.
+    uint8_t argCount = argumentList();
+    // Emit the call op-code followed by a single-byte operand representing the number of arguments passed.
+    emitBytes(OP_CALL, argCount);
+}
+
+
 static void literal(bool canAssign)
 {
     // Inspect the specific keyword token type that triggered this prefix compilation routine.
@@ -365,6 +430,64 @@ static void block()
     // Consume the closing brace, otherwise runtime a compile error.
     consume(TOKEN_RIGHT_BRACE, "Expect '}' after block.");
 }
+
+// Compile a function body and its parameters within a fresh compiler context.
+static void function(FunctionType type)
+{
+    // Initialize a new compiler struct on the C stack, nesting it beneath the current active compiler.
+    Compiler compiler;
+    initCompiler(&compiler, type);
+    beginScope(); // Every function body implicitly introduces a new local scope level for its parameters.
+
+    // Parse the parameter list enclosed in parentheses.
+    consume(TOKEN_LEFT_PAREN, "Expect '(' after function name.");
+    if(!check(TOKEN_RIGHT_PAREN))
+    {
+        do
+        {
+            // Increment the parameter count for the function being compiled.
+            current->function->arity++;
+            // Byte-code operands use a single byte for indexes, restricting the engine to a hard limit of 255 parameters.
+            if (current->function->arity > 255)
+            {
+                errorAtCurrent("Can't have more than 255 parameters.");
+            }
+            // Parse the parameter name identifier, injecting it directly into the current scope's local variable array.
+            uint8_t constant = parseVariable("Expect parameter name.");
+            // Finalize the parameter variable definition, binding its stack slot so it can be accessed inside the body.
+            defineVariable(constant);
+        } while (match(TOKEN_COMMA));
+    }
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after parameters.");
+
+    // Parse the block statement that makes up the executable body of the function.
+    consume(TOKEN_LEFT_BRACE, "Expect '{' before function body.");
+    block();
+
+    // Terminate compilation for this function, popping its compiler context and returning the finished function object.
+    ObjFunction* function = endCompiler();
+
+    // Store the completed function object in the surrounding function's constant table and emit an instruction to load it onto the stack.
+    emitBytes(OP_CONSTANT, makeConstant(OBJ_VAL(function)));
+}
+
+
+// Parse and compile a function declaration statement.
+static void funDeclaration()
+{
+    // Parse the function name identifier and add it to the global constant table, returning its index.
+    uint8_t global = parseVariable("Expect function name.");
+
+    // Mark the function variable as initialized immediately so the function can safely reference itself recursively.
+    markInitialized();
+
+    // Compile the function body, parameters, and local byte-code chunk using a separate compiler instance.
+    function(TYPE_FUNCTION);
+
+    // Output the byte-code instruction to bind the compiled function object to its identifier in the global table.
+    defineVariable(global);
+}
+
 
 static void varDeclaration()
 {
@@ -458,28 +581,32 @@ static void forStatement()
 
 
 // Parse an if statement by evaluating its condition and then issuing a jump instruction to perform the control flow.
-static void ifStatement()
-{
+static void ifStatement() {
     consume(TOKEN_LEFT_PAREN, "Expect '(' after 'if'.");
     expression(); // Leaves condition result on top of the stack
-    consume(TOKEN_RIGHT_PAREN, "Expect ')' after 'if'.");
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after condition.");
 
     // Emit jump with a placeholder operand; saves index for patching
     int thenJump = emitJump(OP_JUMP_IF_FALSE);
     emitByte(OP_POP); // Clean up condition value if it evaluates to true
     statement(); // Compile the 'then' branch body
 
-    // We must pass over the else clause if the condition is truthy.
-    int elseJump = emitJump(OP_JUMP);
+    // Track the jump past the else branch; initialized to -1 to signify no else clause is present.
+    int elseJump = -1;
+    // We must pass over the else clause if the condition is truthy, but only if an else keyword actually exists.
+    if (match(TOKEN_ELSE)) {
+        elseJump = emitJump(OP_JUMP);
+    }
 
     // Fix the placeholder jump operand to point to the current chunk offset
     patchJump(thenJump);
-    emitByte(OP_POP);
-
-    // Compile the else branch if one is present.
-    if (match(TOKEN_ELSE)) statement();
-    patchJump(elseJump);
     emitByte(OP_POP); // Clean up condition value if it evaluates to false
+
+    // Compile the else branch body and patch its jump offset only if one was found during parsing.
+    if (elseJump != -1) {
+        statement();
+        patchJump(elseJump);
+    }
 }
 
 // Parse a print statement by evaluating the its operand, consuming the semicolon and adding the PRINT op-code to the byte-code chunk.
@@ -488,6 +615,26 @@ static void printStatement()
     expression();
     consume(TOKEN_SEMICOLON, "Expect ';' after value.");
     emitByte(OP_PRINT);
+}
+
+static void returnStatement()
+{
+    // Ensure that the compiler is within a function, where return statements can be used.
+    if (current -> type == TYPE_SCRIPT)
+    {
+        error("Can't return from top-level code.");
+    }
+
+    if (match(TOKEN_SEMICOLON))
+    {
+        emitReturn();
+    }
+    else
+    {
+        expression();
+        consume(TOKEN_SEMICOLON, "Expect ';' after return value.");
+        emitByte(OP_RETURN);
+    }
 }
 
 // Parse a while loop statement by evaluating its conditions and issuing jump instructions to implement the control flow.
@@ -542,7 +689,11 @@ static void synchronize()
 
 static void declaration()
 {
-    if (match(TOKEN_VAR))
+    if (match(TOKEN_FUN))
+    {
+        funDeclaration();
+    }
+    else if (match(TOKEN_VAR))
     {
         varDeclaration();
     }
@@ -568,6 +719,10 @@ static void statement()
     else if (match(TOKEN_IF))
     {
         ifStatement();
+    }
+    else if (match(TOKEN_RETURN))
+    {
+        returnStatement();
     }
     else if (match(TOKEN_WHILE))
     {
@@ -689,7 +844,7 @@ static void unary(bool canAssign)
 // We use C's designated array initialiser syntax ('[INDEX] = ...') to explicitly map each 'TokenType' enum value to its exact slot
 // within the rules matrix, ensuring clean lookup tracking for the Pratt parser.
 ParseRule rules[] = {
-  [TOKEN_LEFT_PAREN]    = {grouping, NULL,   PREC_NONE},   // Starts a grouped expression (e.g., '(1 + 2)'). Has no infix role or intrinsic precedence.
+  [TOKEN_LEFT_PAREN]    = {grouping, call,   PREC_CALL},   // Starts a grouped expression (e.g., '(1 + 2)'). Has no infix role or intrinsic precedence.
   [TOKEN_RIGHT_PAREN]   = {NULL,     NULL,   PREC_NONE},   // Delimits grouping boundaries. Handled manually inside the grouping function.
   [TOKEN_LEFT_BRACE]    = {NULL,     NULL,   PREC_NONE},   // Delimits block structures. Handled separately by statement parsers.
   [TOKEN_RIGHT_BRACE]   = {NULL,     NULL,   PREC_NONE},   // Delimits block structures. Handled separately by statement parsers.
@@ -879,6 +1034,8 @@ static uint8_t parseVariable(const char* errorMessage)
 
 static void markInitialized()
 {
+    // Ensure that a function in global scope cannot call this function, as it requires locally scoped variables.
+    if (current -> scopeDepth == 0) return;
     current -> locals[current -> localCount - 1].depth = current -> scopeDepth;
 }
 
@@ -898,14 +1055,11 @@ static ParseRule* getRule(TokenType type)
 }
 
 // Scan and compile Lox source code and produce a chunk of byte-code to be used by the virtual machine.
-bool compile(const char* source, Chunk* chunk)
+ObjFunction* compile(const char* source)
 {
     initScanner(source);
     Compiler compiler;
-    initCompiler(&compiler);
-
-    // Chunk to create with the compiler = the chunk within the VM to be filled and is hence empty.
-    compilingChunk = chunk;
+    initCompiler(&compiler, TYPE_SCRIPT);
 
     // Initialise error handling flags.
     parser.hadError = false;
@@ -919,7 +1073,7 @@ bool compile(const char* source, Chunk* chunk)
         declaration();
     }
 
-    // We have consumed the EOF token and hence the compiler has produced the required byte-code chunk and can hence be terminated.
-    endCompiler();
-    return !parser.hadError;
+    // We have consumed the EOF token and hence the compiler has produced the required byte-code chunk for the function and can hence be terminated and returned.
+    ObjFunction* function = endCompiler();
+    return parser.hadError ? NULL : function;
 }

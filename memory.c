@@ -26,6 +26,19 @@ static void freeObject(Obj* object)
     // Inspects the object's type tag to determine the correct cleanup logic.
     switch(object -> type)
     {
+        case OBJ_FUNCTION:
+        {
+            // Safely casts the base Obj pointer back to its specific ObjFunction type.
+            ObjFunction* function = (ObjFunction*)object;
+            // Frees the chunk of byte-code representing the function body as well as the other meta-data.
+            // The function name is handled by the GC and so does not need to be explicitly freed here.
+            freeChunk(&function -> chunk);
+            FREE(ObjFunction, object);
+            break;
+        }
+        case OBJ_NATIVE:
+            FREE(ObjNative, object);
+            break;
         case OBJ_STRING:
         {
             // Safely casts the base Obj pointer back to its specific ObjString type.

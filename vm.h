@@ -1,17 +1,24 @@
 #ifndef clox_vm_h
 #define clox_vm_h
 
-#include "chunk.h"
+#include "object.h"
 #include "table.h"
 #include "value.h"
 
-#define STACK_MAX 256 // Maximum size for a sequence of instructions.
-
+#define FRAMES_MAX 64 // Maximum number of function call frames at any one time. This is the size of the call stack.
+#define STACK_MAX (FRAMES_MAX * UINT8_COUNT) // Maximum stack size for local variables = (FRAMES_MAX * 256)
 
 typedef struct
 {
-    Chunk* chunk; // The chunk to be executed by the virtual machine.
-    uint8_t* ip; // The instruction pointer. It stores the current location within the chunk's code that the VM is executing.
+    ObjFunction* function; // Pointer to the compiled Lox function object currently being executed.
+    uint8_t* ip; // The instruction pointer tracking the current bytecode index inside the function.
+    Value* slots; // Pointer into the VM stack where this frame's local variables begin.
+} CallFrame;
+
+typedef struct
+{
+    CallFrame frames[FRAMES_MAX]; // An array of active call frames tracking the nested chain of function invocations.
+    int frameCount; // The current number of active call frames sitting inside the frames array.
     Value stack[STACK_MAX]; // VM's stack that is used for local variables within statements/expressions.
     Value* stackTop; // Pointer to the top of the VM stack.
     Table globals; // Hash table storing the global variables defined in a CLox program. It is of the form (<variableName>, <value>).

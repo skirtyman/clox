@@ -21,6 +21,22 @@ static Obj* allocateObject(size_t size, ObjType type)
     return object;
 }
 
+ObjFunction* newFunction()
+{
+    ObjFunction* function = ALLOCATE_OBJ(ObjFunction, OBJ_FUNCTION);
+    function -> arity = 0;
+    function -> name = NULL;
+    initChunk(&function -> chunk);
+    return function;
+}
+
+ObjNative* newNative(NativeFn function)
+{
+    ObjNative* native = ALLOCATE_OBJ(ObjNative, OBJ_NATIVE);
+    native -> function = function;
+    return native;
+}
+
 static ObjString* allocateString(char* chars, int length, uint32_t hash)
 {
     // Allocates an ObjString on the heap and initializes its base Obj metadata as a string type.
@@ -87,11 +103,29 @@ ObjString* copyString(const char* chars, int length)
     return allocateString(heapChars, length, hash);
 }
 
+// Print a function by showing its name.
+static void printFunction(ObjFunction* function)
+{
+    if (function -> name == NULL)
+    {
+        printf("<script>");
+        return;
+    }
+
+    printf("<fn %s>", function -> name -> chars);
+}
+
 void printObject(Value value)
 {
     // Switch over the type of the object.
     switch(OBJ_TYPE(value))
     {
+        case OBJ_FUNCTION: // Found a string, therefore get its name and print.
+            printFunction(AS_FUNCTION(value));
+            break;
+        case OBJ_NATIVE:
+            printf("<native fn>");
+            break;
         case OBJ_STRING: // Found a string, therefore get its character array and print.
             printf("%s", AS_CSTRING(value));
             break;

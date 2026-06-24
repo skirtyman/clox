@@ -1,6 +1,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "common.h"
 #include "compiler.h"
@@ -12,12 +13,18 @@
 // Create a global instance of the virtual machine. This is not good practice as it reduces flexibility and ease of use within host applications.
 VM vm;
 
+static Value clockNative(int argCount, Value* args)
+{
+    return NUMBER_VAL((double)clock() / CLOCKS_PER_SEC);
+}
+
 static void resetStack()
 {
     vm.stackTop = vm.stack;
+    vm.frameCount = 0;
 }
 
-// Report a runtime error to the use.
+// Report a runtime error to the user and display a stack trace for debugging.
 static void runtimeError(const char* format, ...)
 {
     // Initialize a variable argument list to handle dynamic string formatting.
@@ -28,14 +35,36 @@ static void runtimeError(const char* format, ...)
     va_end(args);
     fputs("\n", stderr);
 
-    // Calculate the current instruction index by finding the offset of the instruction pointer
-    // relative to the beginning of the byte-code chunk. We subtract 1 because `ip` has already
-    // advanced past the failing instruction.
-    size_t instruction = vm.ip - vm.chunk->code - 1;
-    // Look up the source code line number associated with the failing byte-code instruction offset.
-    int line = vm.chunk->lines[instruction];
-    fprintf(stderr, "[line %d] in script\n", line);
-    // Clear the VM's value stack to reset the engine state cleanly after the crash.
+    // Walk backward from the topmost active frame down to the entry-level script frame.
+    for (int i = vm.frameCount - 1; i >= 0; i--)
+    {
+        CallFrame* frame = &vm.frames[i];
+        ObjFunction* function = frame -> function;
+        // Calculate the executing instruction index by looking one byte behind the forward-pointing instruction pointer.
+        size_t instruction = frame -> ip - function -> chunk.code - 1;
+        // Print the source code line number stored in the current chunk's debug array.
+        fprintf(stderr, "[line %d] in ", function -> chunk.lines[instruction]);
+        // If the function name pointer is null, we are executing the top-level implicit main script block.
+        if (function -> name == NULL)
+        {
+            fprintf(stderr, "script\n");
+        }
+        else
+        {
+            // Print the human-readable string representation of the named function declaration.
+            fprintf(stderr, "%s\n", function -> name -> chars);
+        }
+    }
+    resetStack();
+}
+
+static void defineNative(const char* name, NativeFn function)
+{
+    push(OBJ_VAL(copyString(name, (int)strlen(name))));
+    push(OBJ_VAL(newNative(function)));
+    tableSet(&vm.globals, AS_STRING(vm.stack[0]), vm.stack[1]);
+    pop();
+    pop();
 }
 
 void initVM()
@@ -44,6 +73,8 @@ void initVM()
     vm.objects = NULL;
     initTable(&vm.globals);
     initTable(&vm.strings);
+
+    defineNative("clock", clockNative);
 }
 
 
@@ -73,6 +104,71 @@ static Value peek(int distance)
     return vm.stackTop[-1 - distance];
 }
 
+// Initialize a new CallFrame on the execution stack to run a compiled function.
+static bool call(ObjFunction* function, int argCount)
+{
+    // Check the function has been called with the correct number of arguments.
+    if (argCount != function->arity)
+    {
+        runtimeError("Expected %d arguments but got %d.", function->arity, argCount);
+        return false;
+    }
+
+    // Ensure that a function call chain does not overflow the call stack. Hence report an error.
+    if (vm.frameCount == FRAMES_MAX)
+    {
+        runtimeError("Stack Overflow.");
+        return false;
+    }
+
+    // Allocate and slide into a fresh execution frame slot at the top of the VM's call stack.
+    CallFrame* frame = &vm.frames[vm.frameCount++];
+    frame->function = function;
+
+    // Anchor the frame's instruction pointer directly to the beginning of the function's bytecode chunk.
+    frame->ip = function->chunk.code;
+
+    // Calculate the frame's window into the value stack, positioning slot 0 to point to the function object itself.
+    // This allows parameters and locals to be indexed relative to this baseline offset.
+    frame->slots = vm.stackTop - argCount - 1;
+    return true;
+}
+
+
+// Validate and route a call expression based on the runtime type of the callee object.
+static bool callValue(Value callee, int argCount)
+{
+    // Ensure the callee is a heap-allocated object before inspecting its internal type tag.
+    if (IS_OBJ(callee))
+    {
+        switch (OBJ_TYPE(callee))
+        {
+            case OBJ_FUNCTION:
+                // Cast the generic value into a concrete function object pointer and initialize its call frame.
+                return call(AS_FUNCTION(callee), argCount);
+            case OBJ_NATIVE:
+            {
+                // Cast the generic value into a concrete native function object pointer, then extract its raw C function pointer.
+                NativeFn native = AS_NATIVE(callee);
+                // Directly invoke the C function, passing the argument count and a pointer to the first argument slot on the VM stack.
+                Value result = native(argCount, vm.stackTop - argCount);
+                // Discard the arguments and the native function object from the stack by sliding the top pointer backward.
+                vm.stackTop -= argCount + 1;
+                // Place the returned value from the host environment's execution back onto the top of the stack.
+                push(result);
+                return true;
+            }
+            default:
+                break; // Non-callable object type.
+        }
+    }
+
+    // Fall-through case handling primitive values or non-invokable objects like strings or instances.
+    runtimeError("Can only call functions and classes.");
+    return false;
+}
+
+
 // Determine the falsiness of a value. Nil and False => falsey and every other value is truthy.
 static bool isFalsey(Value value)
 {
@@ -97,15 +193,20 @@ static void concatenate()
 
 static InterpretResult run()
 {
+    // Get the call frame being executed by the VM.
+    CallFrame* frame = &vm.frames[vm.frameCount - 1];
+
     // Get a byte-code instruction by dereferencing the pointer and returning the item and then incrementing the instruction pointer.
     // This is so IP always points to the address of the next instruction.
-    #define READ_BYTE() (*vm.ip++)
-    // The next byte in the chunk at a OP_CONSTANT instruction is the address within the constant pool, therefore we fetch the literal value
+    #define READ_BYTE() (*frame -> ip++)
+    // The next byte in the frame at a OP_CONSTANT instruction is the address within the constant pool, therefore we fetch the literal value
     // at this address.
-    #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
+    #define READ_CONSTANT() \
+        (frame -> function -> chunk.constants.values[READ_BYTE()])
     // Read a 16-bit operand from the chunk of byte-code.
     #define READ_SHORT() \
-        (vm.ip += 2, (uint16_t)((vm.ip[-2] << 8) | vm.ip[-1]))
+        (frame -> ip += 2, \
+        (uint16_t)((frame -> ip[-2] << 8) | frame -> ip[-1]))
     // Read a string literal
     #define READ_STRING() AS_STRING(READ_CONSTANT())
     // Stack operations required to process binary operations.
@@ -123,6 +224,7 @@ static InterpretResult run()
     // Pull instructions from the chunk until a return statement is found and the loop is broken.
     for (;;)
     {
+        /*
         #ifdef DEBUG_TRACE_EXECUTION
             // Print the contents of the VM's instruction stack to the console.
             printf("          ");
@@ -133,10 +235,10 @@ static InterpretResult run()
                 printf(" ]");
             }
             printf("\n");
-            disassembleInstruction(vm.chunk, (int)(vm.ip - vm.chunk -> code)); // Display the instruction at the instruction pointer within the chunk.
-                                                                               // We use pointer arithmetic as vm.ip is an absolute address in the chunk.
+            disassembleInstruction(&frame -> function -> chunk, (int)(frame -> ip - frame -> function -> chunk.code)); // Display the instruction at the instruction pointer within the chunk.
+                                                                                                                       // We use pointer arithmetic as vm.ip is an absolute address in the chunk.
         #endif
-
+        */
         uint8_t instruction;
         // Fetch the instruction from the chunk and then execute it according to the type of the fetched instruction.
         switch (instruction = READ_BYTE())
@@ -154,13 +256,13 @@ static InterpretResult run()
             case OP_GET_LOCAL:
             {
                 uint8_t slot = READ_BYTE();
-                push(vm.stack[slot]);
+                push(frame -> slots[slot]);
                 break;
             }
             case OP_SET_LOCAL:
             {
                 uint8_t slot = READ_BYTE();
-                vm.stack[slot] = peek(0);
+                frame -> slots[slot] = peek(0);
                 break;
             }
             case OP_GET_GLOBAL: // Get the value of a global variable within a statement.
@@ -245,24 +347,48 @@ static InterpretResult run()
             case OP_JUMP:
             {
                 uint16_t offset = READ_SHORT();
-                vm.ip += offset;
+                frame -> ip += offset;
                 break;
             }
             case OP_JUMP_IF_FALSE:
             {
                 uint16_t offset = READ_SHORT();
-                if (isFalsey(peek(0))) vm.ip += offset;
+                if (isFalsey(peek(0))) frame -> ip += offset;
                 break;
             }
             case OP_LOOP:
             {
                 uint16_t offset = READ_SHORT();
-                vm.ip -= offset;
+                frame -> ip -= offset;
+                break;
+            }
+            case OP_CALL:
+            {
+                int argCount = READ_BYTE();
+                // Pass the arguments and peek down past them to find the callable object slot on the VM stack.
+                // If the object is not a valid callable type, trigger a runtime error and halt execution.
+                if (!callValue(peek(argCount), argCount))
+                {
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                frame = &vm.frames[vm.frameCount - 1];
                 break;
             }
             case OP_RETURN:
-                // Interpreter has successfully finished executing the chunk, we can know print the top of the stack (the result).
-                return INTERPRET_OK;
+            {
+                Value result = pop();
+                vm.frameCount--;
+                if (vm.frameCount == 0)
+                {
+                    pop();
+                    return INTERPRET_OK;
+                }
+
+                vm.stackTop = frame -> slots;
+                push(result);
+                frame = &vm.frames[vm.frameCount - 1];
+                break;
+            }
         }
     }
     // Delete MACROs to not interfere with the rest of the interpreter.
@@ -275,25 +401,16 @@ static InterpretResult run()
 
 InterpretResult interpret(const char* source)
 {
-    // Initialize a temporary, local chunk to store the compiled byte-code for the VM to execute.
-    Chunk chunk;
-    initChunk(&chunk);
+    // Compile source code into a top-level implicit function object
+    ObjFunction* function = compile(source);
+    if (function == NULL) return INTERPRET_COMPILE_ERROR; // The compiler could not compile the source code.
 
-    // Compile the source code into byte-code. Abort and clean up memory if a compilation error occurs.
-    if (!compile(source, &chunk))
-    {
-        freeChunk(&chunk);
-        return INTERPRET_COMPILE_ERROR;
-    }
+    // Push the function onto the stack to protect it from garbage collection
+    push(OBJ_VAL(function));
 
-    // Bind the compiled source code to the VM ready for execution. Also set IP to point to the first compiled instruction.
-    vm.chunk = &chunk;
-    vm.ip = vm.chunk -> code;
+    // Allocate and initialize the very first call frame for the top-level script
+    call(function, 0);
 
     // Execute the byte-code within the virtual machine.
-    InterpretResult result = run();
-
-    // Free the allocated byte-code in the chunk and return the result from the VM.
-    freeChunk(&chunk);
-    return result;
+    return run();
 }
