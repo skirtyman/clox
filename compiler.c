@@ -172,6 +172,21 @@ static void emitBytes(uint8_t byte1, uint8_t byte2)
     emitByte(byte2);
 }
 
+static void emitLoop(int loopStart)
+{
+    // Write backward loop jump instruction to chunk
+    emitByte(OP_LOOP);
+
+    // Calculate backward jump offset including the 2-byte operand size
+    int offset = currentChunk() -> count - loopStart + 2;
+    if (offset > UINT16_MAX) error("Loop body too large.");
+
+    // Write the 16-bit offset split across two separate bytes
+    emitByte((offset >> 8) & 0xff);
+    emitByte(offset & 0xff);
+}
+
+
 static void emitReturn()
 {
     emitByte(OP_RETURN);
@@ -196,6 +211,34 @@ static void emitConstant(Value value)
 {
     // We write the bytes of the OP-CODE, in this case a constant, and the operand itself to the chunk.
     emitBytes(OP_CONSTANT, makeConstant(value));
+}
+
+// Replace dummy jump operand, with the real address once the body of the IF statement has been evaluated.
+static void patchJump(int offset)
+{
+    // -2 to adjust for the byte-code jump offset itself.
+    int jump = currentChunk() -> count - offset - 2;
+
+    if (jump > UINT16_MAX)
+    {
+        error("Too much code to jump over.");
+    }
+
+    currentChunk() -> code[offset] = (jump >> 8) & 0xff;
+    currentChunk() -> code[offset+1] = jump & 0xff;
+}
+
+static int emitJump(uint8_t instruction)
+{
+    // Write the jump op-code to the chunk
+    emitByte(instruction);
+
+    // Write 2 placeholder bytes for the 16-bit jump offset. This enables a maximum jump of 65535 lines of code
+    emitByte(0xff);
+    emitByte(0xff);
+
+    // Return the starting index of the 2-byte place holder.
+    return currentChunk() -> count - 2;
 }
 
 static void initCompiler(Compiler* compiler)
@@ -229,7 +272,7 @@ static void endScope()
 {
     current -> scopeDepth--;
     // Pop tokens while there are locals and they are in the tighter scope we are leaving.
-    while (current -> localCount > 0 && current -> local[current -> localCount - 1].depth > current -> scopeDepth)
+    while (current -> localCount > 0 && current -> locals[current -> localCount - 1].depth > current -> scopeDepth)
     {
         emitByte(OP_POP);
         current -> localCount--;
@@ -245,7 +288,21 @@ static void parsePrecedence(Precedence precedence);
 static uint8_t identifierConstant(Token* name);
 static uint8_t parseVariable(const char* errorMessage);
 static void defineVariable(uint8_t global);
+static int resolveLocal(Compiler* compiler, Token* name);
+static void markInitialized();
+static int initJump(uint8_t instruction);
 
+static void and_(bool canAssign)
+{
+    // Short-circuit: skip the right-hand side if the left operand is false
+    int endJump = emitJump(OP_JUMP_IF_FALSE);
+
+    emitByte(OP_POP); // Clean up left operand if it evaluates to true
+    parsePrecedence(PREC_AND); // Evaluate the right-hand operand
+
+    // Point the short-circuit jump target here if the left operand was false
+    patchJump(endJump);
+}
 
 static void binary(bool canAssign)
 {
@@ -338,12 +395,120 @@ static void expressionStatement()
     emitByte(OP_POP); // Semantically, an expression statement performs a side-effect and we discard the result, therefore issuing a pop from the stack.
 }
 
+static void forStatement()
+{
+    beginScope(); // Enclose the loop variables in their own local scope
+    consume(TOKEN_LEFT_PAREN, "Expect '(' after 'for'.");
+
+    // 1. Parse the initializer clause
+    if (match(TOKEN_SEMICOLON))
+    {
+        // No loop initializer.
+    }
+    else if (match(TOKEN_VAR))
+    {
+        varDeclaration();
+    }
+    else
+    {
+        expressionStatement();
+    }
+
+    int loopStart = currentChunk() -> count; // Save point where condition is evaluated
+    int exitJump = -1;
+
+    // 2. Parse the condition clause
+    if (!match(TOKEN_SEMICOLON))
+    {
+        expression();
+        consume(TOKEN_SEMICOLON, "Expect ';' after loop condition.");
+
+        // Jump out of the loop if the condition is false.
+        exitJump = emitJump(OP_JUMP_IF_FALSE); // Changed emitJump to emitJump
+        emitByte(OP_POP); // Pop condition result; added missing semicolon
+    }
+
+    // 3. Parse the increment clause
+    if (!match(TOKEN_RIGHT_PAREN))
+    {
+        int bodyJump = emitJump(OP_JUMP); // Skip increment code on first pass
+        int incrementStart = currentChunk() -> count; // Save point where increment begins
+        expression();
+        emitByte(OP_POP); // Discard increment expression result
+        consume(TOKEN_RIGHT_PAREN, "Expect ')' after for clauses.");
+
+        emitLoop(loopStart); // Loop back to the condition check
+        loopStart = incrementStart; // Redirect main loop back to the increment block
+        patchJump(bodyJump); // Target for jumping straight into the loop body
+    }
+
+    // 4. Parse the loop body
+    statement();
+    emitLoop(loopStart); // Repeat loop (jumps to increment or condition)
+
+    // Patch the condition's exit jump if one was generated
+    if (exitJump != -1)
+    {
+        patchJump(exitJump);
+        emitByte(OP_POP); // Clean up the condition value on exit
+    }
+
+    endScope(); // Leave loop's outer local variable scope
+}
+
+
+// Parse an if statement by evaluating its condition and then issuing a jump instruction to perform the control flow.
+static void ifStatement()
+{
+    consume(TOKEN_LEFT_PAREN, "Expect '(' after 'if'.");
+    expression(); // Leaves condition result on top of the stack
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after 'if'.");
+
+    // Emit jump with a placeholder operand; saves index for patching
+    int thenJump = emitJump(OP_JUMP_IF_FALSE);
+    emitByte(OP_POP); // Clean up condition value if it evaluates to true
+    statement(); // Compile the 'then' branch body
+
+    // We must pass over the else clause if the condition is truthy.
+    int elseJump = emitJump(OP_JUMP);
+
+    // Fix the placeholder jump operand to point to the current chunk offset
+    patchJump(thenJump);
+    emitByte(OP_POP);
+
+    // Compile the else branch if one is present.
+    if (match(TOKEN_ELSE)) statement();
+    patchJump(elseJump);
+    emitByte(OP_POP); // Clean up condition value if it evaluates to false
+}
+
 // Parse a print statement by evaluating the its operand, consuming the semicolon and adding the PRINT op-code to the byte-code chunk.
 static void printStatement()
 {
     expression();
     consume(TOKEN_SEMICOLON, "Expect ';' after value.");
     emitByte(OP_PRINT);
+}
+
+// Parse a while loop statement by evaluating its conditions and issuing jump instructions to implement the control flow.
+static void whileStatement()
+{
+    // Keep a reference to the offset in the chunk that contains the start of the loop, to issue the correct index for the jump.
+    int loopStart = currentChunk() -> count;
+    consume(TOKEN_LEFT_PAREN, "Expect '(' after 'while'.");
+    expression(); // Leaves condition result on top of the stack
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after 'while'.");
+
+    // Skip the loop body if the condition evaluates to false
+    int exitJump = emitJump(OP_JUMP_IF_FALSE);
+    emitByte(OP_POP); // Clean up condition value if it evaluates to true
+
+    statement(); // Compile the inner loop body statement or block
+    emitLoop(loopStart);
+
+    // Fix the placeholder jump operand to point past the loop body
+    patchJump(exitJump);
+    emitByte(OP_POP); // Clean up condition value if it evaluates to false
 }
 
 // Panic Mode synchronisation method, to stop cascading and ghost compilation errors.
@@ -396,6 +561,18 @@ static void statement()
     {
         printStatement();
     }
+    else if (match(TOKEN_FOR))
+    {
+        forStatement();
+    }
+    else if (match(TOKEN_IF))
+    {
+        ifStatement();
+    }
+    else if (match(TOKEN_WHILE))
+    {
+        whileStatement();
+    }
     else if (match(TOKEN_LEFT_BRACE))
     {
         beginScope();
@@ -424,6 +601,22 @@ static void number(bool canAssign)
     // Wrap the converted number literal into the VM Value type.
     emitConstant(NUMBER_VAL(value));
 }
+
+static void or_(bool canAssign)
+{
+    // If left side is false, skip to evaluating the right side
+    int elseJump = emitJump(OP_JUMP_IF_FALSE);
+    // If left side is true, jump over the right side completely
+    int endJump = emitJump(OP_JUMP);
+
+    // Target for the false-case jump; right side needs evaluation now
+    patchJump(elseJump);
+    emitByte(OP_POP); // Clean up the left operand value
+
+    parsePrecedence(PREC_OR); // Evaluate the right-hand operand
+    patchJump(endJump); // Target for skipping the right side when true
+}
+
 
 // Emit the byte-code for a string literal by stripping its surrounding quotes, copying the characters to the heap, and emitting its constant pool index.
 static void string(bool canAssign)
@@ -518,7 +711,7 @@ ParseRule rules[] = {
   [TOKEN_IDENTIFIER]    = {variable, NULL,   PREC_NONE},   // Variable lookups and targets. Will act as a prefix literal loader.
   [TOKEN_STRING]        = {string,   NULL,   PREC_NONE},   // Raw character sequence data literal. Will act as a prefix literal loader.
   [TOKEN_NUMBER]        = {number,   NULL,   PREC_NONE},   // Numeric data literal (e.g., '3.14'). Emits raw values immediately via prefix.
-  [TOKEN_AND]           = {NULL,     NULL,   PREC_NONE},   // Logical short-circuiting conjunction operator ('a and b').
+  [TOKEN_AND]           = {NULL,     and_,   PREC_AND},    // Logical short-circuiting conjunction operator ('a and b').
   [TOKEN_CLASS]         = {NULL,     NULL,   PREC_NONE},   // Keyword introducing object blueprint descriptions. Handled as a declaration statement.
   [TOKEN_ELSE]          = {NULL,     NULL,   PREC_NONE},   // Keyword splitting conditional statement logical execution flows.
   [TOKEN_FALSE]         = {literal,  NULL,   PREC_NONE},   // Boolean false data literal. Will act as a prefix literal loader.
@@ -526,7 +719,7 @@ ParseRule rules[] = {
   [TOKEN_FUN]           = {NULL,     NULL,   PREC_NONE},   // Keyword introducing local subroutine declarations.
   [TOKEN_IF]            = {NULL,     NULL,   PREC_NONE},   // Keyword introducing basic branching conditional execution flows.
   [TOKEN_NIL]           = {literal,  NULL,   PREC_NONE},   // Clear representation of null/empty data references.
-  [TOKEN_OR]            = {NULL,     NULL,   PREC_NONE},   // Logical short-circuiting disjunction operator ('a or b').
+  [TOKEN_OR]            = {NULL,     or_,    PREC_NONE},   // Logical short-circuiting disjunction operator ('a or b').
   [TOKEN_PRINT]         = {NULL,     NULL,   PREC_NONE},   // Statement keyword outputting evaluation results straight to stdout.
   [TOKEN_RETURN]        = {NULL,     NULL,   PREC_NONE},   // Statement keyword exiting active frames, optionally tracking output variables.
   [TOKEN_SUPER]         = {NULL,     NULL,   PREC_NONE},   // References base implementation contexts during class inheritance lookups.

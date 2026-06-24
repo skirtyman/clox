@@ -28,6 +28,9 @@ typedef enum
     OP_NOT, // Form >>> OP_NOT => Return the logical NOT of the operand. This is 1 byte instruction.
     OP_NEGATE, // Form >>> OP_NEGATE <operand> => Returns negation of operand => OP_NEGATE 1.0 == -1.0. This is a 2 byte instruction.
     OP_PRINT, // Form >>> OP_PRINT => Signals the VM to print the value at the top of the stack. This is a 1-byte instruction.
+    OP_JUMP, // Form >>> OP_JUMP <offset> => Unconditionally advances the instruction pointer forward by the 2-byte <offset>. This is a 3-byte instruction.
+    OP_JUMP_IF_FALSE, // Form >>> OP_JUMP_IF_FALSE <offset> => Pops the condition value. If false, advances the instruction pointer by the 2-byte <offset>. This is a 3-byte instruction.
+    OP_LOOP, // Form >>> OP_LOOP => Enables looping applying a negative jump to the `ip`.
     OP_RETURN, // The VM has reached the end of a chunk of byte-code and returns the current execution frame (function).
 } OpCode;
 
