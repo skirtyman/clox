@@ -10,6 +10,10 @@ typedef enum
     OP_NIL, // Form >>> OP_NIL => Push a Nil value onto the VM stack. This is a 1-byte instruction.
     OP_TRUE, // Form >>> OP_TRUE => Push the boolean value `true` on to the VM stack. This is a 1-byte instruction.
     OP_FALSE, // Form >>> OP_FALSE => Push the boolean value `false` on to the VM stack. This is a 1-byte instruction.
+    OP_POP, // Form >>> OP_POP => Pop a value from the top of the stack. This is a 1-byte instruction.
+    OP_GET_GLOBAL, // Form >>> OP_GET_GLOBAL => Get a global variable with a specified index into the constant pool. This index points to the heap-allocated hash table.
+    OP_DEFINE_GLOBAL, // Form >>> OP_DEFINE_GLOBAL => Define a global variable on the VM heap.
+    OP_SET_GLOBAL, // Form >>> OP_SET_GLOBAL <index> => Sets a global variable, whose name is constantsTable[index] within the VM globals hash table to the item popped off of the VM stack.
     OP_EQUAL, // Form >>> OP_EQUAL => Push the boolean value `a == b` on to the VM stack where a and b are popped operands. This is a 1-byte instruction.
     OP_GREATER, // Form >>> OP_GREATER => Push the boolean value `a > b` on to the VM stack where a and b are popped operands. This is a 1-byte instruction.
     OP_LESS, // Form >>> OP_LESS => Push the boolean value `a < b` on to the VM stack where a and b are popped operands. This is a 1-byte instruction.
@@ -20,6 +24,7 @@ typedef enum
     OP_DIVIDE,
     OP_NOT, // Form >>> OP_NOT => Return the logical NOT of the operand. This is 1 byte instruction.
     OP_NEGATE, // Form >>> OP_NEGATE <operand> => Returns negation of operand => OP_NEGATE 1.0 == -1.0. This is a 2 byte instruction.
+    OP_PRINT, // Form >>> OP_PRINT => Signals the VM to print the value at the top of the stack. This is a 1-byte instruction.
     OP_RETURN, // The VM has reached the end of a chunk of byte-code and returns the current execution frame (function).
 } OpCode;
 

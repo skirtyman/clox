@@ -14,6 +14,7 @@ typedef struct
     uint8_t* ip; // The instruction pointer. It stores the current location within the chunk's code that the VM is executing.
     Value stack[STACK_MAX]; // VM's stack that is used for local variables within statements/expressions.
     Value* stackTop; // Pointer to the top of the VM stack.
+    Table globals; // Hash table storing the global variables defined in a CLox program. It is of the form (<variableName>, <value>).
     Table strings; // Interning table used to store a single unique copy of every string literal in the program.
     Obj* objects; // Head of the list of dynamically allocated objects within a given CLox program.
 } VM;

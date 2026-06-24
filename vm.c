@@ -42,12 +42,14 @@ void initVM()
 {
     resetStack();
     vm.objects = NULL;
+    initTable(&vm.globals);
     initTable(&vm.strings);
 }
 
 
 void freeVM()
 {
+    freeTable(&vm.globals);
     freeTable(&vm.strings);
     freeObjects();
 }
@@ -101,6 +103,8 @@ static InterpretResult run()
     // The next byte in the chunk at a OP_CONSTANT instruction is the address within the constant pool, therefore we fetch the literal value
     // at this address.
     #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
+    // Read a string literal
+    #define READ_STRING() AS_STRING(READ_CONSTANT())
     // Stack operations required to process binary operations.
     #define BINARY_OP(valueType, op) \
         do { \
@@ -112,7 +116,6 @@ static InterpretResult run()
             double a = AS_NUMBER(pop()); \
             push(valueType(a op b)); \
         } while (false)
-
 
     // Pull instructions from the chunk until a return statement is found and the loop is broken.
     for (;;)
@@ -144,6 +147,39 @@ static InterpretResult run()
             case OP_NIL: push(NIL_VAL); break;
             case OP_TRUE: push(BOOL_VAL(true)); break;
             case OP_FALSE: push(BOOL_VAL(false)); break;
+            case OP_POP: pop(); break;
+            case OP_GET_GLOBAL: // Get the value of a global variable within a statement.
+            {
+                ObjString* name = READ_STRING();  // An index into the constant table is supplied, which points to the string name of a global variable. We can get the global
+                                                  // by getting this key and sending it to the heap-allocated hash table `globals` which stores the variables value.
+                Value value;
+                if (!tableGet(&vm.globals, name, &value)) // If we cannot get a data item, then the global is not defined and hence a runtime error has occurred.
+                {
+                    runtimeError("Undefined variable '%s'.", name -> chars);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(value); // Value has been found and we can therefore push it onto the stack.
+                break;
+            }
+            case OP_DEFINE_GLOBAL: // Define a global variable by getting the name of the variable from the constant table.
+                                   // Taking the value from the top of the stack and store it in a hash table with that name as the key.
+            {
+                ObjString* name = READ_STRING();
+                tableSet(&vm.globals, name, peek(0));
+                pop();
+                break;
+            }
+            case OP_SET_GLOBAL:
+            {
+                ObjString* name = READ_STRING(); // Read the name the of the global variable being accessed.
+                if (tableSet(&vm.globals, name, peek(0))) // If the variable cannot be set, remove it from the table and report a runtime error.
+                {
+                    tableDelete(&vm.globals, name);
+                    runtimeError("Undefined variable '%s'.", name -> chars);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                break;
+            }
             case OP_EQUAL:
             {
                 Value b = pop();
@@ -187,16 +223,19 @@ static InterpretResult run()
                 }
                 push(NUMBER_VAL(-AS_NUMBER(pop())));
                 break;
-            case OP_RETURN:
-                // Interpreter has successfully finished executing the chunk, we can know print the top of the stack (the result).
+            case OP_PRINT:
                 printValue(pop());
                 printf("\n");
+                break;
+            case OP_RETURN:
+                // Interpreter has successfully finished executing the chunk, we can know print the top of the stack (the result).
                 return INTERPRET_OK;
         }
     }
     // Delete MACROs to not interfere with the rest of the interpreter.
     #undef READ_BYTE
     #undef READ_CONSTANT
+    #undef READ_STRING
     #undef BINARY_OP
 }
 

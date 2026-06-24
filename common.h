@@ -11,4 +11,7 @@
 // This is similar to the chunk debugging which did this statically and in one pass.
 #define DEBUG_TRACE_EXECUTION
 
+// Maximum number of local variables that can be in scope at any one time.
+#define UINT8_COUNT (UINT8_MAX + 1)
+
 #endif
