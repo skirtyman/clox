@@ -28,6 +28,13 @@ Non-zero	Smaller than oldSize	Shrink existing allocation.
 Non-zero	Larger than oldSize	    Grow existing allocation.
 */
 void* reallocate(void* pointer, size_t oldSize, size_t newSize);
+
+// Perform the marking stage of the Mark-Sweep GC.
+void markObject(Obj* object);
+void markValue(Value value);
+void collectGarbage();
+
+
 // Free objects stored within the virtual machine.
 void freeObjects();
 #endif

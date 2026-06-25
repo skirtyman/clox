@@ -24,7 +24,12 @@ typedef struct
     Table globals; // Hash table storing the global variables defined in a CLox program. It is of the form (<variableName>, <value>).
     Table strings; // Interning table used to store a single unique copy of every string literal in the program.
     ObjUpvalue* openUpvalues; // Linked list representing the open up values within the source code.
+    size_t bytesAllocated; // The total number of bytes allocated into memory. This can be used to tune the frequency in which the GC is run.
+    size_t nextGC; // Threshold that indicates when to run the GC.
     Obj* objects; // Head of the list of dynamically allocated objects within a given CLox program.
+    int grayCount; // The total number of grey objects currently pending processing inside the garbage collector's working list stack.
+    int grayCapacity; // The maximum capacity limits of the dynamically allocated memory buffer reserved for the garbage collection grey stack.
+    Obj** grayStack; // Array of object pointers forming the tracking stack working list used by the tri-colour marking garbage collector.
 } VM;
 
 typedef enum

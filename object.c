@@ -14,10 +14,16 @@ static Obj* allocateObject(size_t size, ObjType type)
 {
     Obj* object = (Obj*)reallocate(NULL, 0, size);
     object -> type = type;
+    object -> isMarked = false;
 
     // When allocating a new object, add it to the list within the VM.
     object -> next = vm.objects;
     vm.objects = object;
+
+    #ifdef DEBUG_LOG_GC
+        printf("%p allocate %zu for %d\n", (void*)object, size, type);
+    #endif // Log memory information if enabled for the GC.
+
     return object;
 }
 

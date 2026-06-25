@@ -4,6 +4,7 @@
 
 #include "common.h"
 #include "compiler.h"
+#include "memory.h"
 #include "scanner.h"
 
 #ifdef DEBUG_PRINT_CODE
@@ -1165,4 +1166,14 @@ ObjFunction* compile(const char* source)
     // We have consumed the EOF token and hence the compiler has produced the required byte-code chunk for the function and can hence be terminated and returned.
     ObjFunction* function = endCompiler();
     return parser.hadError ? NULL : function;
+}
+
+void markCompilerRoots()
+{
+    *Compiler compiler = current;
+    while (compiler != NULL)
+    {
+        markObject((Obj*)compiler -> function);
+        compiler = compiler -> enclosing;
+    }
 }

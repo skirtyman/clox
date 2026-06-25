@@ -30,5 +30,7 @@ void tableAddAll(Table* from, Table* to);
 
 // Find a string in a hash table using string interning and hence safe `==`.
 ObjString* tableFindString(Table* table, const char* chars, int length, uint32_t hash);
+// Mark all of the entries within the hash table to be swept by the GC.
+void markTable(Table* table);
 
 #endif

@@ -36,6 +36,7 @@ typedef enum
 struct Obj
 {
     ObjType type;
+    bool isMarked; // Mark to determine whether an object should be swept by the GC.
     struct Obj* next; // Store a reference to the next dynamically allocated object. This is so garbage collection is made easier.
 };
 
