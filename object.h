@@ -8,12 +8,14 @@
 // Get the type of a given Obj.
 #define OBJ_TYPE(value) (AS_OBJ(value) -> type)
 
-// Check if in Obj is a function/string.
+// Check if in Obj is a closure/function/string.
+#define IS_CLOSURE(value)  isObjType(value, OBJ_CLOSURE)
 #define IS_FUNCTION(value) isObjType(value, OBJ_FUNCTION)
 #define IS_NATIVE(value)   isObjType(value, OBJ_NATIVE)
 #define IS_STRING(value)   isObjType(value, OBJ_STRING)
 
 // Convert a CLox Value into either a pointer to a ObjFunction or an ObjString pointer / the character array associated with the string.
+#define AS_CLOSURE(value)  ((ObjClosure*)AS_OBJ(value))
 #define AS_FUNCTION(value) ((ObjFunction*)AS_OBJ(value))
 #define AS_NATIVE(value) \
     (((ObjNative*)AS_OBJ(value)) -> function)
@@ -23,9 +25,11 @@
 // The range of types that are heap-allocated within CLox
 typedef enum
 {
+    OBJ_CLOSURE,
     OBJ_FUNCTION,
     OBJ_NATIVE,
     OBJ_STRING,
+    OBJ_UPVALUE
 } ObjType;
 
 // A heap-allocated object within CLox.
@@ -40,6 +44,7 @@ typedef struct
     Obj obj; // Base object state for garbage collection and type tracking. Putting this first,
              // ensures it is first within memory, allowing us to safely cast an ObjFunction* to Obj*.
     int arity; // Number of parameters to the function.
+    int upvalueCount; // The number of Upvalues captured within the closure.
     Chunk chunk; // The chunk of byte-code associated with the function body.
     ObjString* name; // The name of the function, this is useful for reporting runtime errors.
 } ObjFunction;
@@ -65,15 +70,40 @@ struct ObjString
     uint32_t hash; // The hash value used to index into the hash table, storing the strings.
 };
 
+typedef struct ObjUpvalue
+{
+    Obj obj; // The base object header tracking garbage collection meta-data and type identification for this heap-allocated upvalue.
+    Value* location; // A direct pointer to the storage location of the closed-over variable, pointing to either the VM stack or this object's own heap storage.
+    Value closed; // Store the index within the heap that the closed upvalue points to.
+    struct ObjUpvalue* next; // Create a linked list of upvalues to ensure all variables point to the same upvalues and not copies within different memory locations.
+} ObjUpvalue;
+
+// A heap-allocated closure within CLox.
+typedef struct
+{
+    Obj obj; // Base object state for garbage collection and type tracking. Putting this first,
+             // ensures it is first within memory, allowing us to safely cast an ObjClosure* to Obj*.
+    ObjFunction* function; // Pointer to the underlying compiled function that this closure wraps.
+    ObjUpvalue** upvalues; // Dynamic array of upvalues associated with any particular closure.
+                           // EXTRACT FROM 25.3.1: "Different closures may have different numbers of upvalues, so we need a dynamic array. The upvalues themselves are
+                           //                       dynamically allocated too, so we end up with a double pointer—a pointer to a dynamically allocated array of pointers
+                           //                       to upvalues. We also store the number of elements in the array."
+    int upvalueCount; // The number of upvalues within the closure.
+} ObjClosure;
+
 // Function Utilities
+ObjClosure* newClosure(ObjFunction* function);
 ObjFunction* newFunction();
 ObjNative* newNative(NativeFn function);
+
 
 // String Utilities
 // Takes ownership of an existing heap-allocated character array, interns it, and wraps it in an ObjString without allocating new memory for the raw text.
 ObjString* takeString(char* chars, int length);
 // Allocates a new ObjString on the heap, copies the given character array into it, and null-terminates it.
 ObjString* copyString(const char* chars, int length);
+// Utility to create a runtime representation of an upvalue.
+ObjUpvalue* newUpvalue(Value* slot);
 // Print an CLox object to the console.
 void printObject(Value value);
 

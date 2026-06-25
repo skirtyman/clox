@@ -10,7 +10,7 @@
 
 typedef struct
 {
-    ObjFunction* function; // Pointer to the compiled Lox function object currently being executed.
+    ObjClosure* closure; // Pointer to the compiled Lox closure object currently being executed.
     uint8_t* ip; // The instruction pointer tracking the current bytecode index inside the function.
     Value* slots; // Pointer into the VM stack where this frame's local variables begin.
 } CallFrame;
@@ -23,6 +23,7 @@ typedef struct
     Value* stackTop; // Pointer to the top of the VM stack.
     Table globals; // Hash table storing the global variables defined in a CLox program. It is of the form (<variableName>, <value>).
     Table strings; // Interning table used to store a single unique copy of every string literal in the program.
+    ObjUpvalue* openUpvalues; // Linked list representing the open up values within the source code.
     Obj* objects; // Head of the list of dynamically allocated objects within a given CLox program.
 } VM;
 

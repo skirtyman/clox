@@ -17,6 +17,8 @@ typedef enum
     OP_GET_GLOBAL, // Form >>> OP_GET_GLOBAL => Get a global variable with a specified index into the constant pool. This index points to the heap-allocated hash table.
     OP_DEFINE_GLOBAL, // Form >>> OP_DEFINE_GLOBAL => Define a global variable on the VM heap.
     OP_SET_GLOBAL, // Form >>> OP_SET_GLOBAL <index> => Sets a global variable, whose name is constantsTable[index] within the VM globals hash table to the item popped off of the VM stack.
+    OP_GET_UPVALUE, // Form >>> OP_GET_UPVALUE <index> => Get the value of a local variable from a surrounding function scope using the specified upvalue index.
+    OP_SET_UPVALUE, // Form >>> OP_SET_UPVALUE <index> => Sets the value of a local variable in a surrounding function scope using the specified upvalue index.
     OP_EQUAL, // Form >>> OP_EQUAL => Push the boolean value `a == b` on to the VM stack where a and b are popped operands. This is a 1-byte instruction.
     OP_GREATER, // Form >>> OP_GREATER => Push the boolean value `a > b` on to the VM stack where a and b are popped operands. This is a 1-byte instruction.
     OP_LESS, // Form >>> OP_LESS => Push the boolean value `a < b` on to the VM stack where a and b are popped operands. This is a 1-byte instruction.
@@ -32,6 +34,8 @@ typedef enum
     OP_JUMP_IF_FALSE, // Form >>> OP_JUMP_IF_FALSE <offset> => Pops the condition value. If false, advances the instruction pointer by the 2-byte <offset>. This is a 3-byte instruction.
     OP_LOOP, // Form >>> OP_LOOP => Enables looping applying a negative jump to the `ip`.
     OP_CALL, // Form >>> OP_CALL <argCount> => Invokes a callable object at the stack slot below the <argCount> arguments, creating a new CallFrame. This is a 2-byte instruction.
+    OP_CLOSURE, // Form >>> OP_CLOSURE <index> => Creates a closure over a given function whose name is specified within the constant pool at index [index].
+    OP_CLOSE_UPVALUE, // Form >>> OP_CLOSE_UPVALUE => Hoists a local variable from the stack to the heap when its declaring scope exits, closing any open upvalues. This is a 1-byte instruction.
     OP_RETURN, // The VM has reached the end of a chunk of byte-code and returns the current execution frame (function).
 } OpCode;
 

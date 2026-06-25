@@ -22,6 +22,7 @@ static void resetStack()
 {
     vm.stackTop = vm.stack;
     vm.frameCount = 0;
+    vm.openUpvalues = NULL;
 }
 
 // Report a runtime error to the user and display a stack trace for debugging.
@@ -39,7 +40,7 @@ static void runtimeError(const char* format, ...)
     for (int i = vm.frameCount - 1; i >= 0; i--)
     {
         CallFrame* frame = &vm.frames[i];
-        ObjFunction* function = frame -> function;
+        ObjFunction* function = frame -> closure -> function;
         // Calculate the executing instruction index by looking one byte behind the forward-pointing instruction pointer.
         size_t instruction = frame -> ip - function -> chunk.code - 1;
         // Print the source code line number stored in the current chunk's debug array.
@@ -104,17 +105,17 @@ static Value peek(int distance)
     return vm.stackTop[-1 - distance];
 }
 
-// Initialize a new CallFrame on the execution stack to run a compiled function.
-static bool call(ObjFunction* function, int argCount)
+// Initialize a new CallFrame on the execution stack to run a compiled closure.
+static bool call(ObjClosure* closure, int argCount)
 {
     // Check the function has been called with the correct number of arguments.
-    if (argCount != function->arity)
+    if (argCount != closure -> function -> arity)
     {
-        runtimeError("Expected %d arguments but got %d.", function->arity, argCount);
+        runtimeError("Expected %d arguments but got %d.", closure -> function -> arity, argCount);
         return false;
     }
 
-    // Ensure that a function call chain does not overflow the call stack. Hence report an error.
+    // Ensure that a closure call chain does not overflow the call stack. Hence report an error.
     if (vm.frameCount == FRAMES_MAX)
     {
         runtimeError("Stack Overflow.");
@@ -123,14 +124,14 @@ static bool call(ObjFunction* function, int argCount)
 
     // Allocate and slide into a fresh execution frame slot at the top of the VM's call stack.
     CallFrame* frame = &vm.frames[vm.frameCount++];
-    frame->function = function;
+    frame -> closure = closure;
 
     // Anchor the frame's instruction pointer directly to the beginning of the function's bytecode chunk.
-    frame->ip = function->chunk.code;
+    frame -> ip = closure -> function -> chunk.code;
 
     // Calculate the frame's window into the value stack, positioning slot 0 to point to the function object itself.
     // This allows parameters and locals to be indexed relative to this baseline offset.
-    frame->slots = vm.stackTop - argCount - 1;
+    frame -> slots = vm.stackTop - argCount - 1;
     return true;
 }
 
@@ -143,9 +144,10 @@ static bool callValue(Value callee, int argCount)
     {
         switch (OBJ_TYPE(callee))
         {
-            case OBJ_FUNCTION:
-                // Cast the generic value into a concrete function object pointer and initialize its call frame.
-                return call(AS_FUNCTION(callee), argCount);
+            // We do not need to consider OBJ_FUNCTION as we assume all functions will be wrapped in a closure (even if it will never be used).
+            // Therefore the VM never needs to execute a bare function.
+            case OBJ_CLOSURE:
+                return call(AS_CLOSURE(callee), argCount);
             case OBJ_NATIVE:
             {
                 // Cast the generic value into a concrete native function object pointer, then extract its raw C function pointer.
@@ -168,6 +170,52 @@ static bool callValue(Value callee, int argCount)
     return false;
 }
 
+static ObjUpvalue* captureUpvalue(Value* local)
+{
+    // Tracks the immediately preceding upvalue node in the sorted linked list during iteration.
+    ObjUpvalue* prevUpvalue = NULL;
+    // Start scanning from the head of the VM's global linked list of open upvalues.
+    ObjUpvalue* upvalue = vm.openUpvalues;
+    // Walk down the linked list as long as we haven't reached the end and the current upvalue points to a higher stack address.
+    while (upvalue != NULL && upvalue -> location > local)
+    {
+        prevUpvalue = upvalue;
+        upvalue = upvalue -> next;
+    }
+
+    // If an existing open upvalue matches the target stack memory address exactly, reuse it to avoid duplicate wrapper objects.
+    if (upvalue != NULL && upvalue -> location == local)
+    {
+        return upvalue;
+    }
+
+    // Instantiate a new heap-allocated upvalue object that references the memory address of the target local variable.
+    ObjUpvalue* createdUpvalue = newUpvalue(local);
+    createdUpvalue -> next = upvalue;
+
+    if (prevUpvalue == NULL)
+    {
+        vm.openUpvalues = createdUpvalue;
+    }
+    else
+    {
+        prevUpvalue -> next = createdUpvalue;
+    }
+
+    // Return the newly created upvalue instance to be stored inside the current closure's upvalue array.
+    return createdUpvalue;
+}
+
+static void closeUpvalues(Value* last)
+{
+    while (vm.openUpvalues != NULL && vm.openUpvalues -> location >= last)
+    {
+        ObjUpvalue* upvalue = vm.openUpvalues;
+        upvalue -> closed = *upvalue -> location;
+        upvalue -> location = &upvalue -> closed;
+        vm.openUpvalues = upvalue -> next;
+    }
+}
 
 // Determine the falsiness of a value. Nil and False => falsey and every other value is truthy.
 static bool isFalsey(Value value)
@@ -202,7 +250,7 @@ static InterpretResult run()
     // The next byte in the frame at a OP_CONSTANT instruction is the address within the constant pool, therefore we fetch the literal value
     // at this address.
     #define READ_CONSTANT() \
-        (frame -> function -> chunk.constants.values[READ_BYTE()])
+        (frame -> closure -> function -> chunk.constants.values[READ_BYTE()])
     // Read a 16-bit operand from the chunk of byte-code.
     #define READ_SHORT() \
         (frame -> ip += 2, \
@@ -235,8 +283,9 @@ static InterpretResult run()
                 printf(" ]");
             }
             printf("\n");
-            disassembleInstruction(&frame -> function -> chunk, (int)(frame -> ip - frame -> function -> chunk.code)); // Display the instruction at the instruction pointer within the chunk.
-                                                                                                                       // We use pointer arithmetic as vm.ip is an absolute address in the chunk.
+            // Display the instruction at the instruction pointer within the chunk.
+            // We use pointer arithmetic as vm.ip is an absolute address in the chunk.
+            disassembleInstruction(&frame -> closure -> function -> chunk, (int)(frame -> ip - frame -> closure -> function -> chunk.code));
         #endif
         */
         uint8_t instruction;
@@ -295,6 +344,18 @@ static InterpretResult run()
                     runtimeError("Undefined variable '%s'.", name -> chars);
                     return INTERPRET_RUNTIME_ERROR;
                 }
+                break;
+            }
+            case OP_GET_UPVALUE:
+            {
+                uint8_t slot = READ_BYTE();
+                push(*frame -> closure -> upvalues[slot] -> location);
+                break;
+            }
+            case OP_SET_UPVALUE:
+            {
+                uint8_t slot = READ_BYTE();
+                *frame -> closure -> upvalues[slot] -> location = peek(0);
                 break;
             }
             case OP_EQUAL:
@@ -374,9 +435,42 @@ static InterpretResult run()
                 frame = &vm.frames[vm.frameCount - 1];
                 break;
             }
+            case OP_CLOSURE:
+            {
+                // Read the constant pool index from the bytecode stream and convert the retrieved value into an internal function object pointer.
+                ObjFunction* function = AS_FUNCTION(READ_CONSTANT());
+                // Instantiate a new heap-allocated closure object that wraps around the target function layout.
+                ObjClosure* closure = newClosure(function);
+                // Push the newly instantiated closure object onto the VM stack to protect it from garbage collection and prepare it for invocation.
+                push(OBJ_VAL(closure));
+                // Loop through every upvalue required by the compiled function to populate the runtime closure environment.
+                for (int i = 0; i < closure -> upvalueCount; i++)
+                {
+                    // Read the 1-byte flag indicating whether the upvalue is a local variable in the immediate outer scope.
+                    uint8_t isLocal = READ_BYTE();
+                    // Read the 1-byte index that specifies the relative storage location of the target variable.
+                    uint8_t index = READ_BYTE();
+                    if (isLocal)
+                    {
+                        // Capture a local variable from the current call frame's stack slot range, reusing or creating an upvalue object.
+                        closure -> upvalues[i] = captureUpvalue(frame -> slots + index);
+                    }
+                    else
+                    {
+                        // Inherit an existing upvalue directly from the current active closure's own upvalue tracking table.
+                        closure -> upvalues[i] = frame -> closure -> upvalues[index];
+                    }
+                }
+                break;
+            }
+            case OP_CLOSE_UPVALUE:
+                closeUpvalues(vm.stackTop - 1);
+                pop();
+                break;
             case OP_RETURN:
             {
                 Value result = pop();
+                closeUpvalues(frame -> slots);
                 vm.frameCount--;
                 if (vm.frameCount == 0)
                 {
@@ -409,7 +503,10 @@ InterpretResult interpret(const char* source)
     push(OBJ_VAL(function));
 
     // Allocate and initialize the very first call frame for the top-level script
-    call(function, 0);
+    ObjClosure* closure = newClosure(function);
+    pop();
+    push(OBJ_VAL(closure));
+    call(closure, 0);
 
     // Execute the byte-code within the virtual machine.
     return run();
