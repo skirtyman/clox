@@ -25,7 +25,7 @@ void freeTable(Table* table)
 static Entry* findEntry(Entry* entries, int capacity, ObjString* key)
 {
     // Maps the string's hash code to a starting index within the allocated array bounds.
-    uint32_t index = key -> hash % capacity;
+    uint32_t index = key -> hash & (capacity - 1);
 
     // Track the first tombstone we encounter so we can reuse it for insertion later.
     Entry* tombstone = NULL;
@@ -59,7 +59,7 @@ static Entry* findEntry(Entry* entries, int capacity, ObjString* key)
         }
 
         // Advances to the next bucket using linear probing and wraps around at the array boundary.
-        index = (index + 1) % capacity;
+        index = (index + 1) & (capacity - 1);
     }
 }
 
@@ -168,7 +168,7 @@ ObjString* tableFindString(Table* table, const char* chars, int length, uint32_t
 {
     if (table -> count == 0) return NULL;
 
-    uint32_t index = hash % table -> capacity;
+    uint32_t index = hash & (table -> capacity - 1);
     for (;;)
     {
         Entry* entry = &table -> entries[index];
@@ -181,7 +181,7 @@ ObjString* tableFindString(Table* table, const char* chars, int length, uint32_t
         {
             return entry -> key;
         }
-        index = (index + 1) % table -> capacity;
+        index = (index + 1) & (table -> capacity - 1);
     }
 }
 
@@ -202,7 +202,7 @@ void markTable(Table* table)
     for (int i = 0; i < table -> capacity; i++)
     {
         Entry* entry = &table -> entries[i];
-        markObject((Obk*)entry -> key);
+        markObject((Obj*)entry -> key);
         markValue(entry -> value);
     }
 }

@@ -27,6 +27,22 @@ static Obj* allocateObject(size_t size, ObjType type)
     return object;
 }
 
+ObjBoundMethod* newBoundMethod(Value reciever, ObjClosure* method)
+{
+    ObjBoundMethod* bound = ALLOCATE_OBJ(ObjBoundMethod, OBJ_BOUND_METHOD);
+    bound -> reciever = reciever;
+    bound -> method = method;
+    return bound;
+}
+
+ObjClass* newClass(ObjString* name)
+{
+    ObjClass* klass = ALLOCATE_OBJ(ObjClass, OBJ_CLASS);
+    klass -> name = name;
+    initTable(&klass -> methods);
+    return klass;
+}
+
 ObjClosure* newClosure(ObjFunction* function)
 {
     // Allocate memory for the upvalues of the closure.
@@ -54,6 +70,14 @@ ObjFunction* newFunction()
     return function;
 }
 
+ObjInstance* newInstance(ObjClass* klass)
+{
+    ObjInstance* instance = ALLOCATE_OBJ(ObjInstance, OBJ_INSTANCE);
+    instance -> klass = klass;
+    initTable(&instance -> fields); // Initialise the hash table storing the fields of the class.
+    return instance;
+}
+
 ObjNative* newNative(NativeFn function)
 {
     ObjNative* native = ALLOCATE_OBJ(ObjNative, OBJ_NATIVE);
@@ -71,7 +95,9 @@ static ObjString* allocateString(char* chars, int length, uint32_t hash)
     string -> chars = chars;
     string -> hash = hash;
     // Default to interning every string, we do not need values and can therefore set all values to NULL.
+    push(OBJ_VAL(string));
     tableSet(&vm.strings, string, NIL_VAL);
+    pop();
     return string;
 }
 
@@ -153,11 +179,20 @@ void printObject(Value value)
     // Switch over the type of the object.
     switch(OBJ_TYPE(value))
     {
+        case OBJ_BOUND_METHOD:
+            printFunction(AS_BOUND_METHOD(value) -> method -> function);
+            break;
+        case OBJ_CLASS:
+            printf("%s", AS_CLASS(value) -> name -> chars);
+            break;
         case OBJ_CLOSURE:
             printFunction(AS_CLOSURE(value) -> function);
             break;
         case OBJ_FUNCTION: // Found a string, therefore get its name and print.
             printFunction(AS_FUNCTION(value));
+            break;
+        case OBJ_INSTANCE:
+            printf("%s instance", AS_INSTANCE(value) -> klass -> name -> chars);
             break;
         case OBJ_NATIVE:
             printf("<native fn>");

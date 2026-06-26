@@ -19,6 +19,9 @@ typedef enum
     OP_SET_GLOBAL, // Form >>> OP_SET_GLOBAL <index> => Sets a global variable, whose name is constantsTable[index] within the VM globals hash table to the item popped off of the VM stack.
     OP_GET_UPVALUE, // Form >>> OP_GET_UPVALUE <index> => Get the value of a local variable from a surrounding function scope using the specified upvalue index.
     OP_SET_UPVALUE, // Form >>> OP_SET_UPVALUE <index> => Sets the value of a local variable in a surrounding function scope using the specified upvalue index.
+    OP_GET_PROPERTY,// Form >>> OP_GET_PROPERTY <index> => Looks up a property using the string name constant stored at index [index] from an object popped off the stack. This is a 2-byte instruction.
+    OP_SET_PROPERTY, // Form >>> OP_SET_PROPERTY <index> => Sets a property using the string name constant stored at [index] on an object to the value popped off the stack. This is a 2-byte instruction.
+    OP_GET_SUPER, // Form >>> OP_GET_SUPER  => Resolves a superclass method using the string name constant stored at [index] and pushes the bound method to the stack. This is a 2-byte instruction.
     OP_EQUAL, // Form >>> OP_EQUAL => Push the boolean value `a == b` on to the VM stack where a and b are popped operands. This is a 1-byte instruction.
     OP_GREATER, // Form >>> OP_GREATER => Push the boolean value `a > b` on to the VM stack where a and b are popped operands. This is a 1-byte instruction.
     OP_LESS, // Form >>> OP_LESS => Push the boolean value `a < b` on to the VM stack where a and b are popped operands. This is a 1-byte instruction.
@@ -34,9 +37,14 @@ typedef enum
     OP_JUMP_IF_FALSE, // Form >>> OP_JUMP_IF_FALSE <offset> => Pops the condition value. If false, advances the instruction pointer by the 2-byte <offset>. This is a 3-byte instruction.
     OP_LOOP, // Form >>> OP_LOOP => Enables looping applying a negative jump to the `ip`.
     OP_CALL, // Form >>> OP_CALL <argCount> => Invokes a callable object at the stack slot below the <argCount> arguments, creating a new CallFrame. This is a 2-byte instruction.
+    OP_INVOKE, // Form >>> OP_INVOKE => Optimises method invocation by looking up the method name at [nameIndex] and invoking it directly with  arguments.
+    OP_SUPER_INVOKE, // Form >>> OP_SUPER_INVOKE   => Invokes a method on a superclass by looking up the name constant at [nameIndex] and calling it directly with  arguments.
     OP_CLOSURE, // Form >>> OP_CLOSURE <index> => Creates a closure over a given function whose name is specified within the constant pool at index [index].
     OP_CLOSE_UPVALUE, // Form >>> OP_CLOSE_UPVALUE => Hoists a local variable from the stack to the heap when its declaring scope exits, closing any open upvalues. This is a 1-byte instruction.
     OP_RETURN, // The VM has reached the end of a chunk of byte-code and returns the current execution frame (function).
+    OP_CLASS, // Form >>> OP_CLASS <index> => Creates a new runtime class object using the name identifier constant specified at index [index]. This is a 2-byte instruction.
+    OP_INHERIT, // Form >>> OP_INHERIT => Copies the methods of a superclass to a subclass, popping both classes from the VM stack.
+    OP_METHOD // Form >>> OP_METHOD  => Binds a method closure to a class, pulling the method name from constantsTable[index] and pulling the closure and class from the VM stack.
 } OpCode;
 
 typedef struct

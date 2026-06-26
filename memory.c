@@ -98,6 +98,20 @@ static void blackenObject(Obj* object)
     #endif
     switch (object -> type)
     {
+        case OBJ_BOUND_METHOD:
+        {
+            ObjBoundMethod* bound = (ObjBoundMethod*)object;
+            markValue(bound -> reciever);
+            markObject((Obj*)bound -> method);
+            break;
+        }
+        case OBJ_CLASS:
+        {
+            ObjClass* klass = (ObjClass*)object;
+            markObject((Obj*)klass -> name);
+            markTable(&klass -> methods);
+            break;
+        }
         case OBJ_CLOSURE:
         {
             ObjClosure* closure = (ObjClosure*)object;
@@ -113,6 +127,13 @@ static void blackenObject(Obj* object)
             ObjFunction* function = (ObjFunction*) object;
             markObject((Obj*)function -> name);
             markArray(&function -> chunk.constants); // Also mark all of the references made by the function.
+            break;
+        }
+        case OBJ_INSTANCE:
+        {
+            ObjInstance* instance = (ObjInstance*)object;
+            markObject((Obj*)instance -> klass);
+            markTable(&instance -> fields);
             break;
         }
         case OBJ_UPVALUE:
@@ -135,6 +156,17 @@ static void freeObject(Obj* object)
     // Inspects the object's type tag to determine the correct cleanup logic.
     switch(object -> type)
     {
+        case OBJ_BOUND_METHOD:
+            FREE(ObjBoundMethod, object);
+            break;
+        case OBJ_CLASS:
+        {
+            ObjClass* klass = (ObjClass*)object;
+            // Free the method table with the associated class.
+            freeTable(&klass -> methods);
+            FREE(ObjClass, object);
+            break;
+        }
         case OBJ_CLOSURE:
         {
             // Free the associated upvalues with the closure.
@@ -152,6 +184,13 @@ static void freeObject(Obj* object)
             // The function name is handled by the GC and so does not need to be explicitly freed here.
             freeChunk(&function -> chunk);
             FREE(ObjFunction, object);
+            break;
+        }
+        case OBJ_INSTANCE:
+        {
+            ObjInstance* instance = (ObjInstance*)object;
+            freeTable(&instance -> fields); // Free the hash table associated with the instance. Do not free the entries in the table as other instances may refer to it.
+            FREE(ObjInstance, object);
             break;
         }
         case OBJ_NATIVE:
@@ -193,7 +232,7 @@ static void markRoots()
     // Most roots are within the stack and so we can simply walk through it and mark most of the values directly.
     for(Value* slot = vm.stack; slot < vm.stackTop; slot++)
     {
-        markValue(*slot)
+        markValue(*slot);
     }
 
     // Mark the call stack frames maintained by the VM.
@@ -203,7 +242,7 @@ static void markRoots()
     }
 
     // Mark the linked list of upvalues that is maintained by the VM.
-    for (ObjUpvalue* upvalue = vm.openUpvalues; upvalue != NULL, upvalue = upvalue -> next)
+    for (ObjUpvalue* upvalue = vm.openUpvalues; upvalue != NULL; upvalue = upvalue -> next)
     {
         markObject((Obj*)upvalue);
     }
@@ -212,6 +251,7 @@ static void markRoots()
     markTable(&vm.globals);
     // The compiler itself also produces values on the heap / constant table. Therefore it should also be marked.
     markCompilerRoots();
+    markObject((Obj*)vm.initString);
 }
 
 static void traceReferences()

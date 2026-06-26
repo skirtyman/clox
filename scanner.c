@@ -114,6 +114,7 @@ static void skipWhitespace()
                     // Stop skipping if the slash stands alone as a division operator token.
                     return;
                 }
+                break;
             default:
                 return;
         }

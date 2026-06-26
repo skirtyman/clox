@@ -1,8 +1,29 @@
-fun outer() {
-  var x = "outside";
-  fun inner() {
-    print x;
+class Breakfast {
+  init(meat, bread) {
+    this.meat = meat;
+    this.bread = bread;
   }
-  inner();
+
+  serve(who) {
+    print "Enjoy your " + this.meat + " and " +
+        this.bread + ", " + who + ".";
+  }
 }
-outer();
+
+class Brunch < Breakfast {
+  init(meat, bread, drink) {
+    super.init(meat, bread);
+    this.drink = drink;
+  }
+
+  sip() {
+    print "How about a cup of tea?";
+  }
+}
+
+var baconAndToast = Breakfast("bacon", "toast");
+baconAndToast.serve("Dear Reader");
+
+var scone = Brunch("Jam and Clotted Cream", "Scone", "coffee");
+benedict.serve("Customer");
+benedict.sip();

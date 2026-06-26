@@ -23,6 +23,7 @@ typedef struct
     Value* stackTop; // Pointer to the top of the VM stack.
     Table globals; // Hash table storing the global variables defined in a CLox program. It is of the form (<variableName>, <value>).
     Table strings; // Interning table used to store a single unique copy of every string literal in the program.
+    ObjString* initString; // String used by the VM to quickly call constructors.
     ObjUpvalue* openUpvalues; // Linked list representing the open up values within the source code.
     size_t bytesAllocated; // The total number of bytes allocated into memory. This can be used to tune the frequency in which the GC is run.
     size_t nextGC; // Threshold that indicates when to run the GC.

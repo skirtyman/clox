@@ -79,6 +79,8 @@ void initVM()
     vm.grayStack = NULL;
     initTable(&vm.globals);
     initTable(&vm.strings);
+    vm.initString = NULL;
+    vm.initString = copyString("init", 4);
 
     defineNative("clock", clockNative);
 }
@@ -88,6 +90,7 @@ void freeVM()
 {
     freeTable(&vm.globals);
     freeTable(&vm.strings);
+    vm.initString = NULL;
     freeObjects();
 }
 
@@ -140,7 +143,6 @@ static bool call(ObjClosure* closure, int argCount)
     return true;
 }
 
-
 // Validate and route a call expression based on the runtime type of the callee object.
 static bool callValue(Value callee, int argCount)
 {
@@ -149,6 +151,30 @@ static bool callValue(Value callee, int argCount)
     {
         switch (OBJ_TYPE(callee))
         {
+            case OBJ_BOUND_METHOD:
+            {
+                ObjBoundMethod* bound = AS_BOUND_METHOD(callee);
+                vm.stackTop[-argCount - 1] = bound -> reciever;
+                return call(bound -> method, argCount);
+            }
+            // Call the Class initialiser.
+            case OBJ_CLASS:
+            {
+                ObjClass* klass = AS_CLASS(callee);
+                vm.stackTop[-argCount - 1] = OBJ_VAL(newInstance(klass));
+                // Automatically invoke class initializer (constructor).
+                Value initializer;
+                if (tableGet(&klass -> methods, vm.initString, &initializer))
+                {
+                    return call(AS_CLOSURE(initializer), argCount);
+                }
+                else if (argCount != 0)
+                {
+                    runtimeError("Expected 0 arguments but got %d.", argCount);
+                    return false;
+                }
+                return true;
+            }
             // We do not need to consider OBJ_FUNCTION as we assume all functions will be wrapped in a closure (even if it will never be used).
             // Therefore the VM never needs to execute a bare function.
             case OBJ_CLOSURE:
@@ -174,6 +200,60 @@ static bool callValue(Value callee, int argCount)
     runtimeError("Can only call functions and classes.");
     return false;
 }
+
+static bool invokeFromClass(ObjClass* klass, ObjString* name, int argCount)
+{
+    Value method;
+    if (!tableGet(&klass -> methods, name, &method))
+    {
+        runtimeError("Undefined property '%s'.", name -> chars);
+        return false;
+    }
+    return call(AS_CLOSURE(method), argCount);
+}
+
+static bool invoke(ObjString* name, int argCount)
+{
+    Value reciever = peek(argCount); // Get the instance calling the method.
+    if (!IS_INSTANCE(reciever))
+    {
+        runtimeError("Only instances have methods.");
+        return false;
+    }
+
+    ObjInstance* instance = AS_INSTANCE(reciever);
+    // Consider both field and method accesses.
+    Value value;
+    if (tableGet(&instance -> fields, name, &value))
+    {
+        vm.stackTop[-argCount - 1] = value;
+        return callValue(value, argCount);
+    }
+
+    return invokeFromClass(instance -> klass, name, argCount);
+}
+
+// Binds a class method to an instance to capture 'this' dynamically. We do this so the method can access the correct receiver when invoked later.
+static bool bindMethod(ObjClass* klass, ObjString* name)
+{
+    Value method;
+    // Look up the method by name in the class's method table. We do this because methods are shared on the class to save memory.
+    if (!tableGet(&klass -> methods, name, &method))
+    {
+        // Fail if the property does not exist in the class hierarchy. We do this to stop the VM from running undefined code.
+        runtimeError("Undefined property '%s'.", name -> chars);
+        return false;
+    }
+
+    // Wrap the receiver and closure into a new heap-allocated object. We use peek(0) because the target instance is at the top of the stack.
+    ObjBoundMethod* bound = newBoundMethod(peek(0), AS_CLOSURE(method));
+
+    // Swap the raw instance on the stack with the new bound method. We do this so the upcoming call instruction executes the method, not the instance.
+    pop();
+    push(OBJ_VAL(bound));
+    return true;
+}
+
 
 static ObjUpvalue* captureUpvalue(Value* local)
 {
@@ -220,6 +300,14 @@ static void closeUpvalues(Value* last)
         upvalue -> location = &upvalue -> closed;
         vm.openUpvalues = upvalue -> next;
     }
+}
+
+static void defineMethod(ObjString* name)
+{
+    Value method = peek(0);
+    ObjClass* klass = AS_CLASS(peek(1));
+    tableSet(&klass -> methods, name, method);
+    pop();
 }
 
 // Determine the falsiness of a value. Nil and False => falsey and every other value is truthy.
@@ -279,7 +367,6 @@ static InterpretResult run()
     // Pull instructions from the chunk until a return statement is found and the loop is broken.
     for (;;)
     {
-        /*
         #ifdef DEBUG_TRACE_EXECUTION
             // Print the contents of the VM's instruction stack to the console.
             printf("          ");
@@ -294,7 +381,6 @@ static InterpretResult run()
             // We use pointer arithmetic as vm.ip is an absolute address in the chunk.
             disassembleInstruction(&frame -> closure -> function -> chunk, (int)(frame -> ip - frame -> closure -> function -> chunk.code));
         #endif
-        */
         uint8_t instruction;
         // Fetch the instruction from the chunk and then execute it according to the type of the fetched instruction.
         switch (instruction = READ_BYTE())
@@ -363,6 +449,56 @@ static InterpretResult run()
             {
                 uint8_t slot = READ_BYTE();
                 *frame -> closure -> upvalues[slot] -> location = peek(0);
+                break;
+            }
+            case OP_GET_PROPERTY:
+            {
+                if (!IS_INSTANCE(peek(0)))
+                {
+                    runtimeError("Only instances have properties.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                ObjInstance* instance = AS_INSTANCE(peek(0));
+                ObjString* name = READ_STRING();
+
+                Value value;
+                if (tableGet(&instance -> fields, name, &value))
+                {
+                    pop(); // Instance;
+                    push(value);
+                    break;
+                }
+
+                if (!bindMethod(instance -> klass, name))
+                {
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                break;
+            }
+            case OP_SET_PROPERTY:
+            {
+                if (!IS_INSTANCE(peek(1)))
+                {
+                    runtimeError("Only instances have fields.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                ObjInstance* instance = AS_INSTANCE(peek(1));
+                tableSet(&instance -> fields, READ_STRING(), peek(0));
+                Value value = pop();
+                pop();
+                push(value);
+                break;
+            }
+            case OP_GET_SUPER:
+            {
+                ObjString* name = READ_STRING();
+                ObjClass* superclass = AS_CLASS(pop());
+                if (!bindMethod(superclass, name))
+                {
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                 break;
             }
             case OP_EQUAL:
@@ -442,6 +578,29 @@ static InterpretResult run()
                 frame = &vm.frames[vm.frameCount - 1];
                 break;
             }
+            case OP_INVOKE:
+            {
+                ObjString* method = READ_STRING();
+                int argCount = READ_BYTE();
+                if (!invoke(method, argCount))
+                {
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                frame = &vm.frames[vm.frameCount - 1];
+                break;
+            }
+            case OP_SUPER_INVOKE:
+            {
+                ObjString* method = READ_STRING();
+                int argCount = READ_BYTE();
+                ObjClass* superclass = AS_CLASS(pop());
+                if (!invokeFromClass(superclass, method, argCount))
+                {
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                frame = &vm.frames[vm.frameCount - 1];
+                break;
+            }
             case OP_CLOSURE:
             {
                 // Read the constant pool index from the bytecode stream and convert the retrieved value into an internal function object pointer.
@@ -490,6 +649,25 @@ static InterpretResult run()
                 frame = &vm.frames[vm.frameCount - 1];
                 break;
             }
+            case OP_INHERIT:
+            {
+                Value superclass = peek(1);
+                // Check that the super class can be inherited from (i.e. it is a class).
+                if (!IS_CLASS(superclass))
+                {
+                    runtimeError("Superclass must be a class");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                ObjClass* subclass = AS_CLASS(peek(0));
+                tableAddAll(&AS_CLASS(superclass) -> methods, &subclass -> methods);
+                pop(); // Subclass.
+                break;
+            }
+            case OP_METHOD:
+                defineMethod(READ_STRING());
+                break;
+            case OP_CLASS:
+                push(OBJ_VAL(newClass(READ_STRING())));
         }
     }
     // Delete MACROs to not interfere with the rest of the interpreter.

@@ -3,20 +3,27 @@
 
 #include "common.h"
 #include "chunk.h"
+#include "table.h"
 #include "value.h"
 
 // Get the type of a given Obj.
 #define OBJ_TYPE(value) (AS_OBJ(value) -> type)
 
-// Check if in Obj is a closure/function/string.
-#define IS_CLOSURE(value)  isObjType(value, OBJ_CLOSURE)
-#define IS_FUNCTION(value) isObjType(value, OBJ_FUNCTION)
-#define IS_NATIVE(value)   isObjType(value, OBJ_NATIVE)
-#define IS_STRING(value)   isObjType(value, OBJ_STRING)
+// Check if in Obj is a class/closure/function/instance/string.
+#define IS_BOUND_METHOD(value)    isObjType(value, OBJ_BOUND_METHOD)
+#define IS_CLASS(value)           isObjType(value, OBJ_CLASS)
+#define IS_CLOSURE(value)         isObjType(value, OBJ_CLOSURE)
+#define IS_FUNCTION(value)        isObjType(value, OBJ_FUNCTION)
+#define IS_INSTANCE(value)        isObjType(value, OBJ_INSTANCE)
+#define IS_NATIVE(value)          isObjType(value, OBJ_NATIVE)
+#define IS_STRING(value)          isObjType(value, OBJ_STRING)
 
-// Convert a CLox Value into either a pointer to a ObjFunction or an ObjString pointer / the character array associated with the string.
+// Convert a CLox Value into its respective runtime C implementation within the VM.
+#define AS_BOUND_METHOD(value)    ((ObjBoundMethod*)AS_OBJ(value))
+#define AS_CLASS(value)    ((ObjClass*)AS_OBJ(value))
 #define AS_CLOSURE(value)  ((ObjClosure*)AS_OBJ(value))
 #define AS_FUNCTION(value) ((ObjFunction*)AS_OBJ(value))
+#define AS_INSTANCE(value) ((ObjInstance*)AS_OBJ(value))
 #define AS_NATIVE(value) \
     (((ObjNative*)AS_OBJ(value)) -> function)
 #define AS_STRING(value)   ((ObjString*)AS_OBJ(value))
@@ -25,8 +32,11 @@
 // The range of types that are heap-allocated within CLox
 typedef enum
 {
+    OBJ_BOUND_METHOD,
+    OBJ_CLASS,
     OBJ_CLOSURE,
     OBJ_FUNCTION,
+    OBJ_INSTANCE,
     OBJ_NATIVE,
     OBJ_STRING,
     OBJ_UPVALUE
@@ -92,9 +102,37 @@ typedef struct
     int upvalueCount; // The number of upvalues within the closure.
 } ObjClosure;
 
+// A heap-allocated class within CLox. This is its runtime representation within the VM.
+typedef struct
+{
+    Obj obj; // Base object state for garbage collection and type tracking.
+    ObjString* name; // The name of the class.
+    Table methods; // Hash table storing the methods associated with the class. Where keys are the method name
+                   // and values are ObjClosure which represent the method body.
+} ObjClass;
+
+// Runtime representation of an instance of a class.
+typedef struct
+{
+    Obj obj; // Base object state for garbage collection and type tracking.
+    ObjClass* klass; // Class in which this instance is a member of.
+    Table fields; // The fields and values of those fields within the instance.
+} ObjInstance;
+
+// Runtime representation of a method bound to an instance, resolving 'this' dynamically.
+typedef struct
+{
+    Obj obj; // Base object state for garbage collection and type tracking.
+    Value reciever; // The instance ('this') to which the method is bound.
+    ObjClosure* method; // The actual closure function that implements the method.
+} ObjBoundMethod;
+
 // Function Utilities
+ObjBoundMethod* newBoundMethod(Value reciever, ObjClosure* method);
+ObjClass* newClass(ObjString* name);
 ObjClosure* newClosure(ObjFunction* function);
 ObjFunction* newFunction();
+ObjInstance* newInstance(ObjClass* klass);
 ObjNative* newNative(NativeFn function);
 
 
